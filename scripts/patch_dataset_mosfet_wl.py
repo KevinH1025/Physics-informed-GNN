@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import yaml
 
-from src.data.batching import create_prebatched_dataset
+from circuitgnn.data.batching import create_prebatched_dataset
 
 
 def load_device_to_group(config_path: Path) -> dict:

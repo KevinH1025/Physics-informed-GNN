@@ -33,9 +33,9 @@ import torch
 from argparse import Namespace
 from torch_geometric.data import Batch
 
-from src.data.batching import create_prebatched_dataset, _add_device_ptr_tensors
-from src.training.config import load_config, parse_training_config
-from src.training.checkpoint import create_model_from_args
+from circuitgnn.data.batching import create_prebatched_dataset, _add_device_ptr_tensors
+from circuitgnn.training.config import load_config, parse_training_config
+from circuitgnn.training.checkpoint import create_model_from_args
 
 
 def _batch_graphs(graphs, batch_size):
@@ -79,7 +79,7 @@ def _stack_features_for_batch(batch, model, stats, device):
     term_idx = batch.mosfet_terminal_idx.to(device)
     M = mosfet_info.shape[0]
 
-    from src.training.losses import get_device_graph_idx
+    from circuitgnn.training.losses import get_device_graph_idx
     num_graphs = batch.ptr.shape[0] - 1
     g_idx = get_device_graph_idx(M, num_graphs, batch.mosfet_ptr, device)
     node_offsets = batch.ptr[g_idx]

@@ -25,9 +25,9 @@ from tqdm import tqdm
 # Make `src` importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.gnn.architectures.pretrain_backbone import PretrainBackbone
-from src.training.pretrain import pretrain_epoch, pretrain_validate
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.gnn.architectures.pretrain_backbone import PretrainBackbone
+from circuitgnn.training.pretrain import pretrain_epoch, pretrain_validate
 
 
 def parse_args():

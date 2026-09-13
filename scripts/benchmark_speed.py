@@ -26,11 +26,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.circuits.simulator import CircuitSimulator
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.data.sampling import generate_netlist
-from src.training.checkpoint import create_model_from_args
-from src.training.config import parse_training_config
+from circuitgnn.circuits.simulator import CircuitSimulator
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.data.sampling import generate_netlist
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.config import parse_training_config
 
 
 TOPOS = ['fan_smc', 'sau_cfcc', 'peng_tcfc', 'leung_nmcf', 'leung_nmcnr']
@@ -45,7 +45,7 @@ def _spice_worker(args):
     import sys, time
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from src.circuits.simulator import CircuitSimulator
+    from circuitgnn.circuits.simulator import CircuitSimulator
     sim = CircuitSimulator(analysis_types=['dc'] if mode == 'dc' else ['dc', 'ac'])
     t0 = time.perf_counter()
     out = sim.simulate(netlist)

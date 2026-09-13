@@ -37,9 +37,9 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.gnn.architectures.pretrain_backbone import PretrainBackbone
-from src.gnn.components.lut_id_query import LUTIdQuery
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.gnn.architectures.pretrain_backbone import PretrainBackbone
+from circuitgnn.gnn.components.lut_id_query import LUTIdQuery
 
 
 class PhysicsPretrainModel(nn.Module):

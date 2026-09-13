@@ -5,9 +5,9 @@ Training and validation loop functions.
 import torch
 import numpy as np
 
-from src.training.losses import compute_loss, compute_combined_loss
-from src.training.data_loading import get_prediction_mask
-from src.training.metrics import (
+from circuitgnn.training.losses import compute_loss, compute_combined_loss
+from circuitgnn.training.data_loading import get_prediction_mask
+from circuitgnn.training.metrics import (
     compute_voltage_accuracy,
     compute_current_accuracy,
     denormalize_voltage,

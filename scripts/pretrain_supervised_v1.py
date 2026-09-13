@@ -28,10 +28,10 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.training.checkpoint import create_model_from_args
-from src.training.config import parse_training_config
-from src.training.losses import compute_kcl_loss
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.config import parse_training_config
+from circuitgnn.training.losses import compute_kcl_loss
 
 
 _LOG_FLOOR = 1e-12
@@ -530,7 +530,7 @@ def main():
 
         sw = smaxt_active_weight(epoch)
         if sw > 0 and 'mosfet_gm_pred' in out and 'node_currents' in out and getattr(batch, 'node_mosfet_vth', None) is not None:
-            from src.training.losses import compute_smaxt_gm_loss
+            from circuitgnn.training.losses import compute_smaxt_gm_loss
             smaxt_l = compute_smaxt_gm_loss(
                 ss_gm_pred=out['mosfet_gm_pred'],
                 pred_currents=out['node_currents'],

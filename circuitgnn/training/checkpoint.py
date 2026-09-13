@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 import yaml
 
-from src.gnn import get_model, list_models
+from circuitgnn.gnn import get_model, list_models
 
 
 def create_model(

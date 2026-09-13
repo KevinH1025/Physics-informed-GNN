@@ -37,14 +37,14 @@ from torch_geometric.data import Batch
 
 from argparse import Namespace
 
-from src.data.batching import create_prebatched_dataset, _add_device_ptr_tensors
-from src.training.config import load_config, parse_training_config
-from src.training.checkpoint import create_model_from_args
-from src.training.data_loading import (
+from circuitgnn.data.batching import create_prebatched_dataset, _add_device_ptr_tensors
+from circuitgnn.training.config import load_config, parse_training_config
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.data_loading import (
     compute_vdc_normalization,
     compute_current_normalization,
 )
-from src.gnn.components.lut_op_query import LUTOpQuery
+from circuitgnn.gnn.components.lut_op_query import LUTOpQuery
 
 
 LOG_EPS = 1e-12
@@ -93,7 +93,7 @@ def _lut_features_for_batch(batch, model, lut, stats, device):
     is_nmos = mosfet_info[:, 6]
 
     # Resolve MOSFET → graph → node-offset (prebatched convention)
-    from src.training.losses import get_device_graph_idx
+    from circuitgnn.training.losses import get_device_graph_idx
     M = mosfet_info.shape[0]
     num_graphs = batch.ptr.shape[0] - 1
     g_idx = get_device_graph_idx(M, num_graphs, batch.mosfet_ptr, device)

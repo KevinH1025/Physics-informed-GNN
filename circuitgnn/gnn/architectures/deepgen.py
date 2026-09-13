@@ -26,7 +26,7 @@ from .base import BaseGNN
 # Import for frozen device MLP (lazy to avoid circular imports if needed)
 def _load_frozen_device_mlp(config: dict):
     """Load and freeze a pre-trained Device MLP."""
-    from src.models.device_mlp import DeviceMLP
+    from circuitgnn.models.device_mlp import DeviceMLP
     checkpoint_path = config.get('checkpoint')
     if not checkpoint_path:
         raise ValueError("frozen_device_mlp_config must specify 'checkpoint' path")
@@ -180,7 +180,7 @@ class DeepGENConv(BaseGNN):
         # Device aggregation layer (device virtual node)
         device_aggregation_config = device_aggregation_config or {}
         if device_aggregation_config.get('enabled', False):
-            from src.gnn.components.device_aggregation import DeviceAggregationLayer
+            from circuitgnn.gnn.components.device_aggregation import DeviceAggregationLayer
             self.device_agg = DeviceAggregationLayer(
                 hidden_dim, norm_type=norm_type,
                 attention=device_aggregation_config.get('attention', False),
@@ -297,7 +297,7 @@ class DeepGENConv(BaseGNN):
                 self.device_current_head = None
             elif use_device_pooling_current:
                 # Device-level pooling: predict one current per device from terminal embeddings
-                from src.gnn.components.device_current_head import DevicePoolingCurrentHead
+                from circuitgnn.gnn.components.device_current_head import DevicePoolingCurrentHead
                 c_hidden = current_head_config.get('hidden_dim', 256)
                 c_layers = current_head_config.get('num_layers', 2)
                 c_dropout = current_head_config.get('dropout', 0.0)

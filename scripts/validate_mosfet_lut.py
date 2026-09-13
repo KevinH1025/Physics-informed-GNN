@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 
-from src.physics.mosfet_lut import MosfetLUT
+from circuitgnn.physics.mosfet_lut import MosfetLUT
 
 
 LUT_PATH = 'datasets/lut/lut_v2/sky130_mosfet_lut_v2.h5'

@@ -15,8 +15,8 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 
-from src.data.encoding import build_circuit_trie
-from src.circuits.parser import SPICENetlistParser
+from circuitgnn.data.encoding import build_circuit_trie
+from circuitgnn.circuits.parser import SPICENetlistParser
 
 
 @dataclass
@@ -420,7 +420,7 @@ class CircuitGraphBuilder:
         loop_edge_index, device_terminal_map = self._create_loop_info(terminals, net_to_terminals)
 
         # Create physics constraint tensors (lazy import to avoid circular dependency)
-        from src.training.current_constraints import create_constraint_tensors
+        from circuitgnn.training.current_constraints import create_constraint_tensors
         diff_pair_constraints, mirror_constraints, output_stage_constraints, lambda_mirror_constraints = create_constraint_tensors(
             mosfet_device_names
         )

@@ -4,7 +4,7 @@ Supports both v1 (4-D: W, L, Vds, Vgs) and v2 (5-D: adds Vbs) LUTs.
 
 Use like:
 
-    from src.physics.mosfet_lut import MosfetLUT
+    from circuitgnn.physics.mosfet_lut import MosfetLUT
 
     lut = MosfetLUT.load('datasets/lut/lut_v2/sky130_mosfet_lut_v2.h5')
     params = lut.query('n', W=5.0, L=1.0, Vgs=0.8, Vds=0.9, Vbs=-0.1, M=2)

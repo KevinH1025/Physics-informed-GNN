@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from src.training.checkpoint import load_checkpoint
-from src.training.data_loading import (
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.data_loading import (
     load_prebatched_variant,
     add_ss_node_targets,
     compute_ss_normalization,

@@ -17,9 +17,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.gnn.components.layers import create_deepgcn_layer, get_activation
-from src.gnn.components.virtual_node import VirtualNode
-from src.gnn.components.loop_attention import LoopAttention
+from circuitgnn.gnn.components.layers import create_deepgcn_layer, get_activation
+from circuitgnn.gnn.components.virtual_node import VirtualNode
+from circuitgnn.gnn.components.loop_attention import LoopAttention
 
 
 class PretrainBackbone(nn.Module):

@@ -15,7 +15,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.training.data_loading import load_prebatched_variant
+from circuitgnn.training.data_loading import load_prebatched_variant
 
 dataset_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("datasets/opamp_3stage_fan_smc_v7_2k_nofil")
 split = sys.argv[2] if len(sys.argv) > 2 else "val"

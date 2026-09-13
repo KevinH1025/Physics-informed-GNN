@@ -133,7 +133,7 @@ def main():
     # Re-split and re-save train/val pkls
     import random
     import numpy as np
-    from src.data.batching import create_prebatched_dataset
+    from circuitgnn.data.batching import create_prebatched_dataset
 
     n = len(data)
     indices = list(range(n))

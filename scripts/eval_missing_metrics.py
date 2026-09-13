@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import numpy as np
 
-from src.training.checkpoint import create_model
-from src.training.data_loading import (
+from circuitgnn.training.checkpoint import create_model
+from circuitgnn.training.data_loading import (
     PrebatchedLoader,
     load_prebatched_variant,
     normalize_batches_vdc,
@@ -22,7 +22,7 @@ from src.training.data_loading import (
     add_ss_node_targets,
     compute_ss_normalization,
 )
-from src.training.loops import validate
+from circuitgnn.training.loops import validate
 
 
 EXPERIMENTS = [

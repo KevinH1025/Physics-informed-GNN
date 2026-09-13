@@ -16,10 +16,10 @@ import torch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.training.checkpoint import create_model_from_args
-from src.training.config import parse_training_config
-from src.training.losses import compute_kcl_per_net_debug
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.config import parse_training_config
+from circuitgnn.training.losses import compute_kcl_per_net_debug
 
 REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
 DATASET = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo'

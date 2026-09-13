@@ -16,14 +16,14 @@ import numpy as np
 from collections import defaultdict
 from tqdm import tqdm
 
-from src.training.data_loading import (
+from circuitgnn.training.data_loading import (
     load_prebatched_variant,
     load_prebatched_metadata,
     normalize_batches_vdc,
     normalize_batches_current,
 )
-from src.training.checkpoint import load_checkpoint
-from src.training.metrics import denormalize_voltage, denormalize_current
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.metrics import denormalize_voltage, denormalize_current
 
 
 def analyze_errors(checkpoint_path: str, device: str = 'cuda', max_batches: int = None):

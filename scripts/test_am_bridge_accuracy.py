@@ -22,7 +22,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.training.data_loading import load_prebatched_variant
+from circuitgnn.training.data_loading import load_prebatched_variant
 
 
 def test_am_bridge(batches, device):

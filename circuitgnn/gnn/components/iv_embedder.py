@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src.physics.iv_autoencoder import Encoder
+from circuitgnn.physics.iv_autoencoder import Encoder
 
 
 class _NullCtx:

@@ -27,9 +27,9 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainBatch
-from src.gnn.architectures.pretrain_backbone import PretrainBackbone
-from src.training.pretrain import apply_mosfet_mask, pretrain_loss
+from circuitgnn.data.pretrain_loader import PretrainBatch
+from circuitgnn.gnn.architectures.pretrain_backbone import PretrainBackbone
+from circuitgnn.training.pretrain import apply_mosfet_mask, pretrain_loss
 
 
 class SingleTopologyMaskLoader:

@@ -12,7 +12,7 @@ Pipeline:
     given (W, L, pol) go to the same split so near-duplicates can't leak.
  3. Normalize with train-only mean/std of log10|id|.
  4. Upload normalized tensor to GPU once; batches are free index gathers.
- 5. Encoder + decoder from src.physics.iv_autoencoder. Adam + linear warmup +
+ 5. Encoder + decoder from circuitgnn.physics.iv_autoencoder. Adam + linear warmup +
     ReduceLROnPlateau. bfloat16 autocast on CUDA. Early stop on val plateau.
  6. Validation each epoch: MSE (normalized) + linear-id relative error +
     log-space absolute error. Quantiles from a 1 M random pixel sample.
@@ -48,7 +48,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from src.physics.iv_autoencoder import IVAutoencoder
+from circuitgnn.physics.iv_autoencoder import IVAutoencoder
 
 
 LUT_PATH = 'datasets/lut/lut_v2/sky130_mosfet_lut_v2_id_only.h5'

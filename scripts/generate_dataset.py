@@ -31,9 +31,9 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from modular data package
-from src.data.sampling import generate_lhs_samples, worker_generate_sample
-from src.data.batching import create_prebatched_dataset
-from src.data.plotting import (
+from circuitgnn.data.sampling import generate_lhs_samples, worker_generate_sample
+from circuitgnn.data.batching import create_prebatched_dataset
+from circuitgnn.data.plotting import (
     plot_parameter_distributions,
     plot_node_voltage_distributions,
     plot_device_current_distributions,

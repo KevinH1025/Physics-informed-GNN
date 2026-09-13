@@ -6,9 +6,9 @@ import sys, pickle, yaml, argparse
 import numpy as np, torch
 from pathlib import Path
 sys.path.insert(0, '.'); sys.path.insert(0, 'scripts')
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.training.checkpoint import create_model_from_args
-from src.training.config import parse_training_config
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.config import parse_training_config
 from eval_all_checkpoints import attach_norm
 
 REPO = Path('/dss/dsshome1/03/go49jit2/thesis')

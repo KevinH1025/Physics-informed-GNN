@@ -186,8 +186,8 @@ def worker_generate_sample(args: Tuple) -> Tuple[int, Optional[Dict], str]:
     Returns:
         Tuple of (sample_idx, sample_dict or None, status: 'ok'/'failed'/'filtered')
     """
-    from src.circuits.simulator import CircuitSimulator
-    from src.data.graph_builder import CircuitGraphBuilder
+    from circuitgnn.circuits.simulator import CircuitSimulator
+    from circuitgnn.data.graph_builder import CircuitGraphBuilder
 
     logging.getLogger('PySpice.Spice.NgSpice.Shared').setLevel(logging.ERROR)
 

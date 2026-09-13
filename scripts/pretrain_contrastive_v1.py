@@ -29,8 +29,8 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader, PretrainBatch
-from src.gnn.architectures.pretrain_backbone import PretrainBackbone
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader, PretrainBatch
+from circuitgnn.gnn.architectures.pretrain_backbone import PretrainBackbone
 
 
 class ContrastivePretrainModel(nn.Module):

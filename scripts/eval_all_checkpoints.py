@@ -23,9 +23,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader
-from src.training.checkpoint import create_model_from_args
-from src.training.config import parse_training_config
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.config import parse_training_config
 
 
 REPO = Path('/dss/dsshome1/03/go49jit2/thesis')

@@ -17,7 +17,7 @@ import argparse
 import pickle
 import torch
 
-from src.data.batching import create_prebatched_dataset
+from circuitgnn.data.batching import create_prebatched_dataset
 
 
 def add_terminal_train_mask(graph):

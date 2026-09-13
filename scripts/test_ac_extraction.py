@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.circuits.simulator import CircuitSimulator
-from src.data.sampling import generate_netlist
+from circuitgnn.circuits.simulator import CircuitSimulator
+from circuitgnn.data.sampling import generate_netlist
 
 # Test parameters (typical 2-stage op-amp values)
 params = {

@@ -9,7 +9,7 @@ Similar to a virtual node but at device scope instead of global scope.
 import torch
 import torch.nn as nn
 
-from src.gnn.components.device_current_head import _compute_batch_offsets
+from circuitgnn.gnn.components.device_current_head import _compute_batch_offsets
 
 
 class DeviceAggregationLayer(nn.Module):

@@ -23,7 +23,7 @@ import numpy as np
 import time
 import random
 
-from src.training.data_loading import (
+from circuitgnn.training.data_loading import (
     PrebatchedLoader,
     load_prebatched_variant,
     load_prebatched_metadata,
@@ -41,13 +41,13 @@ from src.training.data_loading import (
     compute_vov_normalization,
     normalize_batches_vov,
 )
-from src.training.loops import train_epoch, validate
-from src.training.losses import compute_kcl_loss, compute_kcl_per_net_debug, UncertaintyWeights
-from src.training.current_constraints import build_mirror_pair_indices, OPAMP_3STAGE_DEVICE_NAMES
-from src.training.scheduler import create_scheduler, apply_warmup, step_scheduler
-from src.training.plotting import plot_training_curves
-from src.training.checkpoint import save_checkpoint, build_full_config, create_model_from_args
-from src.training.config import load_config, parse_training_config
+from circuitgnn.training.loops import train_epoch, validate
+from circuitgnn.training.losses import compute_kcl_loss, compute_kcl_per_net_debug, UncertaintyWeights
+from circuitgnn.training.current_constraints import build_mirror_pair_indices, OPAMP_3STAGE_DEVICE_NAMES
+from circuitgnn.training.scheduler import create_scheduler, apply_warmup, step_scheduler
+from circuitgnn.training.plotting import plot_training_curves
+from circuitgnn.training.checkpoint import save_checkpoint, build_full_config, create_model_from_args
+from circuitgnn.training.config import load_config, parse_training_config
 
 
 def main():
@@ -267,7 +267,7 @@ def main():
         max_n = getattr(args, 'max_train_samples', None)
         if max_n is not None and max_n > 0:
             from torch_geometric.data import Batch as PyGBatch
-            from src.training.data_loading import _sort_edge_index
+            from circuitgnn.training.data_loading import _sort_edge_index
             def _subsample_variant(batches, n, dev):
                 examples, remaining = [], n
                 for b in batches:
@@ -428,7 +428,7 @@ def main():
         sample_batch = train_batches[0]
 
     elif use_fixed_topology:
-        from src.data.fixed_topology_loader import build_fixed_topology_dataset, FixedTopologyLoader
+        from circuitgnn.data.fixed_topology_loader import build_fixed_topology_dataset, FixedTopologyLoader
 
         print(f"\n=== LOADING FIXED-TOPOLOGY DATASET ===")
         gpu_device = args.device if args.device != 'cpu' else None
@@ -505,7 +505,7 @@ def main():
 
     else:
         from torch_geometric.loader import DataLoader as PyGDataLoader
-        from src.training.data_loading import CircuitGraphDataset
+        from circuitgnn.training.data_loading import CircuitGraphDataset
 
         train_file = dataset_path / 'dataset_train.pkl'
         val_file = dataset_path / 'dataset_val.pkl'

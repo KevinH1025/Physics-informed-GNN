@@ -4,15 +4,15 @@ import sys, os, torch, numpy as np, argparse
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.training.config import load_config, parse_training_config
-from src.training.checkpoint import create_model_from_args
-from src.training.data_loading import (
+from circuitgnn.training.config import load_config, parse_training_config
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.data_loading import (
     PrebatchedLoader, load_prebatched_variant,
     compute_vdc_normalization, compute_current_normalization, compute_ss_normalization,
     normalize_batches_vdc, normalize_batches_current, normalize_batches_ss,
     add_ss_node_targets, add_vth_node_targets, add_region_node_targets, add_mosfet_gt_vov,
 )
-from src.training.loops import validate
+from circuitgnn.training.loops import validate
 
 def main():
     parser = argparse.ArgumentParser()

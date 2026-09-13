@@ -12,10 +12,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.training.config import load_config, parse_training_config
-from src.training.data_loading import load_prebatched_variant
-from src.training.checkpoint import create_model_from_args
-from src.training.losses import compute_kcl_loss
+from circuitgnn.training.config import load_config, parse_training_config
+from circuitgnn.training.data_loading import load_prebatched_variant
+from circuitgnn.training.checkpoint import create_model_from_args
+from circuitgnn.training.losses import compute_kcl_loss
 
 
 def get_node_names(dataset_path):

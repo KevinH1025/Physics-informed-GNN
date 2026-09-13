@@ -8,7 +8,7 @@ This module provides utilities for:
 - Learning rate scheduling
 """
 
-from src.training.data_loading import (
+from circuitgnn.training.data_loading import (
     PrebatchedLoader,
     load_prebatched_variant,
     load_prebatched_metadata,
@@ -18,28 +18,28 @@ from src.training.data_loading import (
     normalize_batches_current,
     attach_normalization_stats,
 )
-from src.training.losses import (
+from circuitgnn.training.losses import (
     compute_loss,
     compute_combined_loss,
 )
-from src.training.metrics import (
+from circuitgnn.training.metrics import (
     compute_voltage_accuracy,
     compute_current_accuracy,
     denormalize_voltage,
     denormalize_current,
 )
-from src.training.scheduler import (
+from circuitgnn.training.scheduler import (
     create_scheduler,
     apply_warmup,
     step_scheduler,
 )
-from src.training.loops import (
+from circuitgnn.training.loops import (
     train_epoch,
     validate,
     validate_simple,
 )
-from src.training.plotting import plot_training_curves
-from src.training.checkpoint import (
+from circuitgnn.training.plotting import plot_training_curves
+from circuitgnn.training.checkpoint import (
     create_model,
     create_model_from_args,
     save_checkpoint,

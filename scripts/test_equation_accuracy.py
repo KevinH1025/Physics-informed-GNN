@@ -27,7 +27,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.training.data_loading import load_prebatched_variant
+from circuitgnn.training.data_loading import load_prebatched_variant
 
 REGION_NAMES = {0: 'Cutoff', 1: 'Triode', 2: 'Saturation'}
 

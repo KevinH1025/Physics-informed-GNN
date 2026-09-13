@@ -4,8 +4,8 @@ import sys, torch, numpy as np
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.training.checkpoint import load_checkpoint
-from src.training.data_loading import (
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.data_loading import (
     load_prebatched_variant, normalize_batches_vdc, normalize_batches_current,
 )
 

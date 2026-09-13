@@ -15,14 +15,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import argparse
 import torch
 
-from src.training.checkpoint import load_checkpoint
-from src.training.data_loading import (
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.data_loading import (
     PrebatchedLoader,
     load_prebatched_variant,
     normalize_batches_vdc,
     normalize_batches_current,
 )
-from src.training.loops import validate
+from circuitgnn.training.loops import validate
 
 
 def evaluate_model(model, data_path, split, stats, config, device):

@@ -21,8 +21,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.sampling import generate_lhs_samples, generate_netlist
-from src.circuits.simulator import CircuitSimulator
+from circuitgnn.data.sampling import generate_lhs_samples, generate_netlist
+from circuitgnn.circuits.simulator import CircuitSimulator
 
 # ─── SKY130 PDK constants ───────────────────────────────────────────
 # From nfet_01v8.pm3.spice: u0 = 0.030197, toxe = 4.148e-9

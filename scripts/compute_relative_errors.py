@@ -17,13 +17,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.training.checkpoint import load_checkpoint
-from src.training.data_loading import (
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.data_loading import (
     load_prebatched_variant, get_prediction_mask,
     normalize_batches_vdc, normalize_batches_current,
     compute_ss_normalization, normalize_batches_ss,
 )
-from src.training.metrics import denormalize_voltage, denormalize_current
+from circuitgnn.training.metrics import denormalize_voltage, denormalize_current
 
 
 def compute_relative_errors(experiment_dir, dataset_dir, device='cuda'):

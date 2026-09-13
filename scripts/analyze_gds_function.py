@@ -8,8 +8,8 @@ from scipy.spatial.distance import cdist
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.training.checkpoint import load_checkpoint
-from src.training.data_loading import load_prebatched_variant, add_ss_node_targets
+from circuitgnn.training.checkpoint import load_checkpoint
+from circuitgnn.training.data_loading import load_prebatched_variant, add_ss_node_targets
 from scripts.probe_embeddings import extract_embeddings
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

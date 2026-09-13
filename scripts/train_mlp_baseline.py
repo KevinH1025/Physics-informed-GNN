@@ -34,7 +34,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.pretrain_loader import PretrainCombinedLoader
+from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 
 _LOG_FLOOR = 1e-12
 

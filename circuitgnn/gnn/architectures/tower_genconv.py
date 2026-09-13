@@ -677,7 +677,7 @@ class TowerGENConv(BaseGNN):
         self.loop_attn_warmup_duration = loop_attn_cfg.get('warmup_duration', 0)
         self.current_epoch = 0  # set by training loop
         if self.use_loop_attention:
-            from src.gnn.components.loop_attention import LoopAttention
+            from circuitgnn.gnn.components.loop_attention import LoopAttention
             self.loop_attn_apply_to = loop_attn_cfg.get('apply_to', 'backbone')
             n_loop_layers = backbone_layers
             if self.loop_attn_apply_to == 'all':
@@ -740,7 +740,7 @@ class TowerGENConv(BaseGNN):
         net_attn_cfg = kwargs.get('net_attention_config', {}) or voltage_head_config.get('net_attention', {})
         self.use_net_attention = bool(net_attn_cfg.get('enabled', False))
         if self.use_net_attention:
-            from src.gnn.components.net_self_attention import NetSelfAttention
+            from circuitgnn.gnn.components.net_self_attention import NetSelfAttention
             self.net_attention = NetSelfAttention(
                 hidden_dim=hidden_dim,
                 num_heads=int(net_attn_cfg.get('num_heads', 4)),
@@ -765,7 +765,7 @@ class TowerGENConv(BaseGNN):
         self.use_autograd_ss = current_head_config.get('autograd_ss', False) and use_device_pooling_current
         if predict_currents:
             if use_device_pooling_current:
-                from src.gnn.components.device_current_head import DevicePoolingCurrentHead
+                from circuitgnn.gnn.components.device_current_head import DevicePoolingCurrentHead
                 c_hidden = current_head_config.get('hidden_dim', 256)
                 c_layers = current_head_config.get('num_layers', 2)
                 c_dropout = current_head_config.get('dropout', 0.0)
@@ -2092,7 +2092,7 @@ class TowerGENConv(BaseGNN):
         if M == 0:
             return x_in
         if ptr is not None and mosfet_ptr is not None:
-            from src.training.losses import get_device_graph_idx
+            from circuitgnn.training.losses import get_device_graph_idx
             num_graphs = ptr.shape[0] - 1
             g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
             node_offsets = ptr[g_idx]
@@ -2135,7 +2135,7 @@ class TowerGENConv(BaseGNN):
         ptr = getattr(data, 'ptr', None)
         mosfet_ptr = getattr(data, 'mosfet_ptr', None)
         if ptr is not None and mosfet_ptr is not None:
-            from src.training.losses import get_device_graph_idx
+            from circuitgnn.training.losses import get_device_graph_idx
             num_graphs = ptr.shape[0] - 1
             g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
             node_offsets = ptr[g_idx]
@@ -2169,7 +2169,7 @@ class TowerGENConv(BaseGNN):
         ptr = getattr(data, 'ptr', None)
         mosfet_ptr = getattr(data, 'mosfet_ptr', None)
         if ptr is not None and mosfet_ptr is not None:
-            from src.training.losses import get_device_graph_idx
+            from circuitgnn.training.losses import get_device_graph_idx
             num_graphs = ptr.shape[0] - 1
             g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
             node_offsets = ptr[g_idx]
@@ -2215,7 +2215,7 @@ class TowerGENConv(BaseGNN):
         ptr = getattr(data, 'ptr', None)
         mosfet_ptr = getattr(data, 'mosfet_ptr', None)
         if ptr is not None and mosfet_ptr is not None:
-            from src.training.losses import get_device_graph_idx
+            from circuitgnn.training.losses import get_device_graph_idx
             num_graphs = ptr.shape[0] - 1
             g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
             node_offsets = ptr[g_idx]
@@ -2262,7 +2262,7 @@ class TowerGENConv(BaseGNN):
         ptr = getattr(data, 'ptr', None)
         mosfet_ptr = getattr(data, 'mosfet_ptr', None)
         if ptr is not None and mosfet_ptr is not None:
-            from src.training.losses import get_device_graph_idx
+            from circuitgnn.training.losses import get_device_graph_idx
             num_graphs = ptr.shape[0] - 1
             g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
             node_offsets = ptr[g_idx]
@@ -3628,7 +3628,7 @@ class TowerGENConv(BaseGNN):
 
         # Map MOSFETs to graphs/offsets, then read V at NET nodes (where the
         # baseline learns V well — terminals are unsupervised garbage).
-        from src.training.losses import get_device_graph_idx
+        from circuitgnn.training.losses import get_device_graph_idx
         ptr = data.ptr
         mosfet_ptr = getattr(data, 'mosfet_ptr', None)
         num_graphs = ptr.shape[0] - 1

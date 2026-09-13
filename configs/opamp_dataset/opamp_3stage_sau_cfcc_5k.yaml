@@ -1,0 +1,125 @@
+# Op-Amp 3-Stage Sau CFCC Dataset Configuration — 5k samples
+# Topology: PMOS folded-cascode + cross-coupled feedforward (CFCC) + push-pull
+# Distinct from fan_smc by:
+#   * 'GMF1' group  (M7, PMOS feedforward, gate=VOUTN -> drain=net049)
+#   * 'GMC'  group  (M15, M16, NMOS folded cascode)
+#   * Cross-coupled compensation cap C0: net063 -> vout (vs fan_smc's net050 -> vout)
+#
+# device_to_group is OMITTED — the netlist parser auto-derives it from
+# the template's `W={W_<group>}` references.
+#
+# Usage:
+#   python scripts/generate_dataset.py \
+#     --config configs/opamp_dataset/opamp_3stage_sau_cfcc_5k.yaml \
+#     --output-dir datasets/opamp_3stage_sau_cfcc_5k
+
+dataset:
+  name: opamp_3stage_sau_cfcc
+  template: netlists/opamp_3stage_sau_cfcc_template.sp
+  ac_template: netlists/opamp_3stage_sau_cfcc_ac_template.sp
+  description: Three-stage Sau CFCC op-amp — wide parameter ranges, 5k samples
+
+graph_encoding:
+  normalize_props: true
+
+# device_to_group: omitted — auto-derived from netlist by netlist_parser
+
+# Devices to exclude from current targets (voltage sources used for biasing)
+excluded_current_devices:
+  - vcm_ref
+  - lbreak
+  - vac_inj
+
+# Pre-batching configuration
+pre_batching:
+  enabled: true
+  batch_size: 1024
+  num_batching_variants: 10
+  seed: 42
+
+  # Split ratios
+  train: 0.8
+  val: 0.2
+  test: 0.0
+  split_seed: 88
+
+# Sampling configuration
+sampling:
+  method: lhs
+  total_samples: 5000
+  max_attempts_multiplier: 10.0
+  n_workers: 20
+  save_interval: 1000
+
+  filter:
+    enabled: true
+    rail_margin: 0.0
+    # Internal cascode / fold nodes that legitimately sit far from rails
+    # by design (don't penalize them in the rail filter).
+    exclude_nodes:
+      - gnda
+      - dm_2
+      - net063
+      - net31
+      - net54
+      - net56
+      - voutn         # PMOS folded mirror node (sits near VDD-Vth_p)
+      - net013        # Bias reference node (was 'nbias' in fan_smc)
+    saturation_only: false
+
+  # Wide ranges; let SPICE reject non-convergent designs.
+  constraints: []
+
+parameters:
+  # === MOSFET WIDTHS (log-scale, per finger) ===
+  # SKY130 wmin=0.42µm for nfet/pfet_01v8; cap at 50µm to match fan_smc.
+  W_BIASCM_P: { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_BIASCM_N: { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM1:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM2:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM3:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GMC:      { min: 0.42e-6, max: 50.0e-6, scale: log }   # NEW: NMOS folded cascode
+  W_GMF1:     { min: 0.42e-6, max: 50.0e-6, scale: log }   # NEW: PMOS feedforward
+  W_GMF2:     { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_LOAD2:    { min: 0.42e-6, max: 50.0e-6, scale: log }
+
+  # === MOSFET LENGTHS (log-scale) ===
+  # SKY130 lmin=0.15µm.
+  L_BIASCM_P: { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_BIASCM_N: { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM1:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM2:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM3:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GMC:      { min: 0.15e-6, max: 20.0e-6, scale: log }   # NEW
+  L_GMF1:     { min: 0.15e-6, max: 20.0e-6, scale: log }   # NEW
+  L_GMF2:     { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_LOAD2:    { min: 0.15e-6, max: 20.0e-6, scale: log }
+
+  # === MOSFET MULTIPLIERS (log-scale, integer) ===
+  # Range 1-100 base. Netlist has hardcoded extra multipliers:
+  #   M4=2x, M19/M20=8x, M15/M16=1x (GMC), M17/M12/M18/M13=4x, M22=3x
+  # → effective up to 200 (PMOS bias) / 800 (NMOS bias) per finger group.
+  M_BIASCM_P: { min: 1, max: 100, scale: log, type: int }
+  M_BIASCM_N: { min: 1, max: 100, scale: log, type: int }
+  M_GM1:      { min: 1, max: 100, scale: log, type: int }
+  M_GM2:      { min: 1, max: 100, scale: log, type: int }
+  M_GM3:      { min: 1, max: 100, scale: log, type: int }
+  M_GMC:      { min: 1, max: 100, scale: log, type: int }  # NEW
+  M_GMF1:     { min: 1, max: 100, scale: log, type: int }  # NEW
+  M_GMF2:     { min: 1, max: 100, scale: log, type: int }
+  M_LOAD2:    { min: 1, max: 100, scale: log, type: int }
+
+  # === BIAS CURRENT & COMPENSATION ===
+  # Reference netlist used CAPACITOR_0=1.15p, CURRENT_0_BIAS=20µA — keep
+  # ranges similar to fan_smc so cross-topology comparisons stay fair.
+  I_BIAS: { min: 0.5e-6, max: 100.0e-6, scale: log }
+  C_COMP: { min: 0.5e-12, max: 30.0e-12, scale: log }
+
+  # === OPERATING POINT ===
+  VCM:   { min: 0.7, max: 0.9, scale: linear }
+  VDIFF: { value: 0 }
+
+  # === FIXED PARAMETERS ===
+  VDD:  { value: 1.8 }
+  R_IN: { value: 50000 }
+  R_F:  { value: 50000 }

@@ -1,0 +1,52 @@
+# MAE-style SSL pretrain on openloop only (single-topology, like MAE on ImageNet).
+# 75% mask of MOSFET W/L/M features; reconstruct masked values.
+# Then fine-tune supervised on same openloop dataset.
+data:
+  train_dir: datasets/opamp_3stage_fan_smc_openloop_5k/train
+  val_dir: datasets/opamp_3stage_fan_smc_openloop_5k/val
+
+model:
+  hidden_dim: 128
+  genconv_num_layers: 2
+  norm_type: layer
+  act_type: gelu
+  skip_connection: false
+  dropout: 0.0
+  conv_type: gin
+  mlp_depth: 3
+  tower:
+    backbone_layers: 8
+    loop_attention:
+      enabled: true
+      num_heads: 4
+      head_dim: 32
+      fusion: gate
+      warmup_epochs: 0
+      warmup_duration: 0
+  virtual_node:
+    enabled: true
+    mode: mha
+    num_heads: 4
+    head_dim: 32
+    gate_broadcast: true
+
+pretrain:
+  mask_ratio: 0.90            # extreme node mask
+  edge_drop_ratio: 0.50       # heavy edge drop too
+  mask_target_dim: 4
+  mask_head_hidden: 128
+
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  type: plateau
+  patience: 30
+  factor: 0.5
+  min_lr: 1.0e-6
+
+training:
+  epochs: 200
+  batch_size: 1
+  gradient_clip: 1.0

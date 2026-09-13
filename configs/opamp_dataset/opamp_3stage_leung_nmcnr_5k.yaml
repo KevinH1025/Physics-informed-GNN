@@ -1,0 +1,106 @@
+# Op-Amp 3-Stage Leung NMCNR Dataset Configuration — 5k samples
+# Topology: PMOS folded-cascode + class-A NMOS output + nested Miller comp w/ R0 nulling
+# 24 MOSFETs, 6 groups (BIASCM_N, BIASCM_P, GM1, GM2, GM3, LOAD2).
+# device_to_group is OMITTED — auto-derived by netlist_parser.
+#
+# Distinct parameters vs fan_smc:
+#   - C_COMP2 (second Miller cap in nested-Miller pair)
+#   - R_NULL  (nulling resistor R0 between Miller hub and vout, ref 10 kΩ)
+#   - NO GMF2 group (stage-3 PMOS M11 is in BIASCM_P with 10× multiplier — class-A bias)
+#
+# Usage:
+#   python scripts/generate_dataset.py \
+#     --config configs/opamp_dataset/opamp_3stage_leung_nmcnr_5k.yaml \
+#     --output-dir datasets/opamp_3stage_leung_nmcnr_5k
+
+dataset:
+  name: opamp_3stage_leung_nmcnr
+  template: netlists/opamp_3stage_leung_nmcnr_template.sp
+  ac_template: netlists/opamp_3stage_leung_nmcnr_ac_template.sp
+  description: Three-stage Leung NMCNR op-amp — wide parameter ranges, 5k samples
+
+graph_encoding:
+  normalize_props: true
+
+# device_to_group: omitted — auto-derived from netlist by netlist_parser
+
+excluded_current_devices:
+  - vcm_ref
+  - lbreak
+  - vac_inj
+
+pre_batching:
+  enabled: true
+  batch_size: 1024
+  num_batching_variants: 10
+  seed: 42
+  train: 0.8
+  val: 0.2
+  test: 0.0
+  split_seed: 88
+
+sampling:
+  method: lhs
+  total_samples: 5000
+  max_attempts_multiplier: 10.0
+  n_workers: 20
+  save_interval: 1000
+
+  filter:
+    enabled: true
+    rail_margin: 0.0
+    exclude_nodes:
+      - gnda
+      - dm_2
+      - net063
+      - net31
+      - net54
+      - net56
+      - net044    # Miller-network hub node — sits at intermediate voltage by design
+    saturation_only: false
+
+  constraints: []
+
+parameters:
+  # === MOSFET WIDTHS (log) — matches fan_smc ===
+  W_BIASCM_P: { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_BIASCM_N: { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM1:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM2:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_GM3:      { min: 0.42e-6, max: 50.0e-6, scale: log }
+  W_LOAD2:    { min: 0.42e-6, max: 50.0e-6, scale: log }
+
+  # === MOSFET LENGTHS (log) ===
+  L_BIASCM_P: { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_BIASCM_N: { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM1:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM2:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_GM3:      { min: 0.15e-6, max: 20.0e-6, scale: log }
+  L_LOAD2:    { min: 0.15e-6, max: 20.0e-6, scale: log }
+
+  # === MOSFET MULTIPLIERS (log integer) ===
+  # M11 has hardcoded 10× multiplier (class-A output bias) — effective up to 1000.
+  M_BIASCM_P: { min: 1, max: 100, scale: log, type: int }
+  M_BIASCM_N: { min: 1, max: 100, scale: log, type: int }
+  M_GM1:      { min: 1, max: 100, scale: log, type: int }
+  M_GM2:      { min: 1, max: 100, scale: log, type: int }
+  M_GM3:      { min: 1, max: 100, scale: log, type: int }
+  M_LOAD2:    { min: 1, max: 100, scale: log, type: int }
+
+  # === BIAS CURRENT & COMPENSATION ===
+  # NMCNR uses a pair of Miller caps (C0=5pF ref, C1=3pF ref) plus a 10 kΩ
+  # nulling resistor that places a controlled zero. Wide ranges allow
+  # exploration of the full pole/zero placement design space.
+  I_BIAS:  { min: 0.5e-6,  max: 100.0e-6, scale: log }
+  C_COMP:  { min: 0.5e-12, max: 30.0e-12, scale: log }   # net050 → net044 (ref 5.0 pF)
+  C_COMP2: { min: 0.5e-12, max: 30.0e-12, scale: log }   # net044 → net049 (ref 3.0 pF)
+  R_NULL:  { min: 1000.0,  max: 100000.0, scale: log }   # net044 → vout    (ref 10 kΩ)
+
+  # === OPERATING POINT ===
+  VCM:   { min: 0.7, max: 0.9, scale: linear }
+  VDIFF: { value: 0 }
+
+  # === FIXED PARAMETERS ===
+  VDD:  { value: 1.8 }
+  R_IN: { value: 50000 }
+  R_F:  { value: 50000 }

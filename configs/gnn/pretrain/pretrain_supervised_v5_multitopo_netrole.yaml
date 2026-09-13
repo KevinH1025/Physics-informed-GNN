@@ -1,0 +1,130 @@
+data:
+  path: datasets/opamp_3stage_fan_smc_openloop_5k
+  prebatched: true
+  max_preload_variants: 10
+  preload_to_gpu: true
+model:
+  type: tower_genconv
+  edge_features: true
+  hidden_dim: 128
+  genconv_num_layers: 2
+  norm_type: layer
+  act_type: gelu
+  skip_connection: true
+  gradient_checkpointing: false
+  dropout: 0.0
+  tower:
+    backbone_layers: 8
+    state_tower_layers: 0
+    sensitivity_tower_layers: 0
+    backbone_jk:
+      mode: cat
+      attention: true
+    state_tower_jk:
+      mode: last
+    sensitivity_tower_jk:
+      mode: last
+    loop_attention:
+      enabled: true
+      num_heads: 4
+      head_dim: 32
+      apply_to: backbone
+      fusion: gate
+      warmup_epochs: 350
+      warmup_duration: 800
+  virtual_node:
+    enabled: true
+    mode: mha
+    num_heads: 4
+    head_dim: 32
+    gate_broadcast: true
+  heads:
+    voltage:
+      num_layers: 1
+      hidden_dim: 128
+      dropout: 0.0
+    current:
+      enabled: true
+      num_layers: 2
+      hidden_dim: 128
+      dropout: 0.0
+      device_pooling: true
+    ss:
+      enabled: true
+      num_layers: 2
+      hidden_dim: 512
+      voltage_context: true
+      current_context: true
+      include_bulk: true
+    dc_gain:
+      enabled: false  # no per-topology formula available — skip in pretrain
+      mode: physics
+      hidden_dim: 128
+      num_layers: 2
+      detach_ss: true
+      openloop: false  # pretrain corpus is closed-loop   # no feedback (R_in/R_f) and no R_load — drop beta term
+      r_in: 50000.0
+      r_f: 50000.0
+    ac:
+      enabled: false
+    current_gnn:
+      enabled: false
+  conv_type: gin
+  mlp_depth: 3
+  mosfet_role:
+    enabled: false   # not portable across topologies
+  net_role:
+    enabled: true    # 5-dim one-hot per net (VDD/GND/SIG_IN/SIG_OUT/INTERNAL) — portable
+    dim: 5
+loss:
+  type: mse
+  huber_delta: 1.0
+  current_weight: 1.0
+  current_warmup_epochs: 0
+  kcl_weight: 1.0
+  kcl_gt_filter: 0.0
+  kcl_intermediate_weight: 0.0
+  stage2_weight: 1.0
+  stage2_nodes:
+  - vout
+  - vout_stage1
+  - vg2
+  - vc
+  current_constraints:
+    weight: 0.0
+  gm_physics_loss:
+    weight: 0.0
+  triode_physics_loss:
+    weight: 0.0
+  ss_loss:
+    gm_weight: 1.0
+    gds_weight: 1.0
+  ac_loss:
+    weight: 0.0
+  dc_gain_loss:
+    weight: 0.0  # disabled — head not enabled in pretrain
+  kcl_start_epoch: 200
+  kcl_warmup_epochs: 200
+optimizer:
+  lr: 0.001  # lowered from 3e-3 for stability with mixed-topo batches
+  weight_decay: 0.0
+scheduler:
+  type: plateau
+  warmup_epochs: 50
+  patience: 200
+  factor: 0.5
+  min_lr: 1.0e-06
+training:
+  epochs: 5000
+  batch_size: 1
+  gradient_clip: 0.3   # default tightened (was 1.0)
+  val_freq: 1
+  early_stopping_patience: 800
+  seed: 88
+normalization:
+  target_type: zscore
+  vdd: 1.8
+output:
+  save_best: true
+  save_final: false
+  log_interval: 5

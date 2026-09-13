@@ -1,0 +1,132 @@
+data:
+  max_preload_variants: 10
+  path: datasets/opamp_3stage_fan_smc_openloop_5k
+  prebatched: true
+  preload_to_gpu: true
+loss:
+  ac_loss:
+    weight: 0.0
+  current_constraints:
+    weight: 0.0
+  current_warmup_epochs: 0
+  current_weight: 1.0
+  dc_gain_loss:
+    weight: 0.0
+  gm_physics_loss:
+    weight: 0.0
+  huber_delta: 0.1
+  kcl_gt_filter: 0.0
+  kcl_intermediate_weight: 0.0
+  kcl_start_epoch: 200
+  kcl_warmup_epochs: 200
+  kcl_weight: 1.0
+  ss_loss:
+    gds_weight: 1.0
+    gm_weight: 1.0
+  stage2_nodes:
+  - vout
+  - vout_stage1
+  - vg2
+  - vc
+  stage2_weight: 1.0
+  triode_physics_loss:
+    weight: 0.0
+  type: mse
+  v_loss_type: huber
+  v_weight: 2.0
+model:
+  act_type: gelu
+  conv_type: gin
+  dropout: 0.0
+  edge_features: true
+  genconv_num_layers: 2
+  gradient_checkpointing: false
+  heads:
+    ac:
+      enabled: false
+    current:
+      device_pooling: true
+      dropout: 0.0
+      enabled: true
+      hidden_dim: 128
+      num_layers: 2
+    current_gnn:
+      enabled: false
+    dc_gain:
+      detach_ss: true
+      enabled: false
+      hidden_dim: 128
+      mode: physics
+      num_layers: 2
+      openloop: false
+      r_f: 50000.0
+      r_in: 50000.0
+    ss:
+      current_context: true
+      enabled: true
+      hidden_dim: 512
+      include_bulk: true
+      num_layers: 2
+      voltage_context: true
+    voltage:
+      dropout: 0.0
+      hidden_dim: 128
+      num_layers: 1
+  hidden_dim: 128
+  mlp_depth: 3
+  mosfet_role:
+    enabled: false
+  net_role:
+    dim: 5
+    enabled: true
+  norm_type: layer
+  skip_connection: true
+  tower:
+    backbone_jk:
+      attention: true
+      mode: cat
+    backbone_layers: 8
+    loop_attention:
+      apply_to: backbone
+      enabled: true
+      fusion: gate
+      head_dim: 32
+      num_heads: 4
+      warmup_duration: 800
+      warmup_epochs: 350
+    sensitivity_tower_jk:
+      mode: last
+    sensitivity_tower_layers: 0
+    state_tower_jk:
+      mode: last
+    state_tower_layers: 0
+  type: tower_genconv
+  virtual_node:
+    enabled: true
+    gate_broadcast: true
+    head_dim: 32
+    mode: mha
+    num_heads: 4
+normalization:
+  target_type: zscore
+  vdd: 1.8
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0
+output:
+  log_interval: 5
+  save_best: true
+  save_final: false
+scheduler:
+  factor: 0.5
+  min_lr: 1.0e-06
+  patience: 200
+  type: plateau
+  warmup_epochs: 50
+training:
+  batch_size: 1
+  early_stopping_patience: 800
+  epochs: 5000
+  gradient_clip: 0.3
+  seed: 88
+  val_freq: 1

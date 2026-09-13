@@ -1,0 +1,57 @@
+data:
+  train_path: datasets/opamp_3stage_pretrain_combined/dataset_train.pkl
+  val_path: datasets/opamp_3stage_pretrain_combined/dataset_val.pkl
+
+model:
+  hidden_dim: 128
+  genconv_num_layers: 2
+  norm_type: layer
+  act_type: gelu
+  skip_connection: false
+  dropout: 0.0
+  conv_type: gin
+  mlp_depth: 3
+  tower:
+    backbone_layers: 8
+    loop_attention:
+      enabled: true
+      num_heads: 4
+      head_dim: 32
+      fusion: gate
+      warmup_epochs: 0
+      warmup_duration: 0
+  virtual_node:
+    enabled: true
+    mode: mha
+    num_heads: 4
+    head_dim: 32
+    gate_broadcast: true
+
+# Canonical PINN: V supervision + KCL physics on LUT-derived MOSFET currents.
+# Stable formulation — V supervision anchors training, physics adds inductive bias.
+# Architectural V bound (sigmoid * VDD) + bias init to VDD/2 + KCL warmup
+# all built into the training script.
+physics:
+  voltage_weight: 1.0
+  kcl_weight: 1.0
+  kcl_warmup_epochs: 50   # extended warmup — KCL ramps 0→1 over first 50 ep
+  vdd: 1.8
+  lut_path: datasets/lut/lut_v2/sky130_mosfet_lut_v2_id_gm_gds.h5
+
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  type: plateau
+  patience: 80           # higher patience — give physics time to settle
+  factor: 0.5
+  min_lr: 1.0e-6
+
+training:
+  epochs: 600            # PINN converges slowly; budget 600 epochs (LR will plateau before that)
+  batch_size: 64
+  gradient_clip: 1.0
+
+output:
+  log_interval: 1

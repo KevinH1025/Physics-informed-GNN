@@ -89,10 +89,26 @@ def main():
                         help='Fine-tune from checkpoint on new dataset (cross-topology transfer)')
     parser.add_argument('--freeze-backbone', action='store_true',
                         help='Freeze GNN backbone during fine-tuning (train heads only)')
+    parser.add_argument('--freeze-backbone-epochs', type=int, default=0,
+                        help='Freeze backbone for the first N epochs of fine-tuning, '
+                             'then unfreeze and continue with all params trainable. '
+                             '0 disables this stage (default).')
+    parser.add_argument('--no-bn-reset', action='store_true',
+                        help='At fine-tune, do NOT reset BatchNorm running stats. '
+                             'Default behavior is to reset because pretrain BN stats '
+                             'reflect a different data distribution and degrade transfer.')
+    parser.add_argument('--reset-heads', action='store_true',
+                        help='At fine-tune, load only the backbone weights from the '
+                             'checkpoint and randomly re-initialize the heads. Useful '
+                             'when pretrain heads were tuned for a different distribution '
+                             'and may bias predictions on the new task.')
     parser.add_argument('--backbone-lr-scale', type=float, default=0.1,
                         help='LR scale factor for backbone params when not frozen (default: 0.1 = 10x lower)')
     parser.add_argument('--preload-to-gpu', action='store_true',
                         help='Pre-load all batches to GPU (faster training, uses more VRAM)')
+    parser.add_argument('--max-train-samples', type=int, default=None,
+                        help='Subsample train set to first N graphs (for few-shot scaling experiments). '
+                             'Val set unchanged.')
     parser.add_argument('--ss-gm-loss-weight', type=float, default=0.0, dest='ss_gm_loss_weight',
                         help='Weight for supervised gm loss (0 = disabled)')
     parser.add_argument('--ss-gds-loss-weight', type=float, default=0.0, dest='ss_gds_loss_weight',
@@ -218,6 +234,7 @@ def main():
     ss_region_stats = None
     gm_id_mean, gm_id_std = 0.0, 1.0
     vov_mean, vov_std = 0.0, 1.0
+    vgsvds_mean, vgsvds_std = None, None
     has_ss = False
     variant_config = {'enabled': False}
 
@@ -244,6 +261,34 @@ def main():
         val_batches = load_prebatched_variant(val_dir, variant_id=0, device=preload_device) if val_dir.exists() else None
         if val_batches:
             print(f"Loaded {len(val_batches)} val batches")
+
+        # Few-shot: subsample train set to first N graphs across all variants.
+        # Val set stays full so we evaluate on the same val distribution.
+        max_n = getattr(args, 'max_train_samples', None)
+        if max_n is not None and max_n > 0:
+            from torch_geometric.data import Batch as PyGBatch
+            from src.training.data_loading import _sort_edge_index
+            def _subsample_variant(batches, n, dev):
+                examples, remaining = [], n
+                for b in batches:
+                    if remaining <= 0:
+                        break
+                    for i in range(b.num_graphs):
+                        if remaining <= 0:
+                            break
+                        examples.append(b.get_example(i))
+                        remaining -= 1
+                nb = PyGBatch.from_data_list(examples)
+                if dev is not None:
+                    nb = nb.to(dev)
+                return [_sort_edge_index(nb)]
+            print(f"[few-shot] Subsampling train to first {max_n} graphs (across {len(all_train_variants)} variants)...")
+            for vid in range(len(all_train_variants)):
+                all_train_variants[vid] = _subsample_variant(
+                    all_train_variants[vid], max_n, preload_device,
+                )
+            train_batches = all_train_variants[0]
+            print(f"[few-shot] After subsample: 1 batch with {train_batches[0].num_graphs} graphs")
 
         vdc_mean, vdc_std = compute_vdc_normalization(dataset_path, train_batches, target_norm_type, vdd)
         print(f"vdc normalization: mean={vdc_mean:.4f}, std={vdc_std:.4f}")
@@ -354,6 +399,28 @@ def main():
                 normalize_batches_vov(variant_batches, vov_mean, vov_std)
             if val_batches:
                 normalize_batches_vov(val_batches, vov_mean, vov_std)
+
+        # Compute Vgs/Vds normalization stats if vgsvds head is enabled
+        if getattr(args, 'vgsvds_loss_weight', 0.0) > 0 or getattr(args, 'vgsvds_config', {}).get('enabled', False):
+            all_vgs, all_vds = [], []
+            for b in train_batches:
+                mi = b.mosfet_info.long()
+                num_m = mi.shape[0]
+                num_g = b.ptr.shape[0] - 1
+                m_ptr = getattr(b, 'mosfet_ptr', None)
+                if m_ptr is not None:
+                    mg = torch.bucketize(torch.arange(num_m, device=mi.device), m_ptr[1:].to(mi.device), right=True)
+                else:
+                    mg = torch.arange(num_m, device=mi.device) // (num_m // num_g)
+                offs = b.ptr.to(mi.device)[mg]
+                vt = b.node_voltage_targets
+                all_vgs.append((vt[mi[:, 0] + offs] - vt[mi[:, 2] + offs]).cpu())
+                all_vds.append((vt[mi[:, 1] + offs] - vt[mi[:, 2] + offs]).cpu())
+            all_vgs = torch.cat(all_vgs)
+            all_vds = torch.cat(all_vds)
+            vgsvds_mean = torch.tensor([all_vgs.mean().item(), all_vds.mean().item()])
+            vgsvds_std = torch.tensor([all_vgs.std().item(), all_vds.std().item()])
+            print(f"Vgs/Vds normalization: Vgs mean={vgsvds_mean[0]:.4f}, std={vgsvds_std[0]:.4f} | Vds mean={vgsvds_mean[1]:.4f}, std={vgsvds_std[1]:.4f}")
 
         train_loader = PrebatchedLoader(train_batches, shuffle=True)
         val_loader = PrebatchedLoader(val_batches, shuffle=False) if val_batches else None
@@ -693,19 +760,63 @@ def main():
             for s in skipped:
                 print(f"    {s}")
 
+        # If --reset-heads, drop all non-backbone keys before loading. The
+        # backbone is everything before the heads (input proj, GNN layers, JK,
+        # virtual node, loop attention). Anything else (voltage_head, current
+        # head, gm/gds heads, dc gain head, etc.) gets to keep its fresh init.
+        if getattr(args, 'reset_heads', False):
+            backbone_prefixes_load = (
+                'input_linear.', 'input_proj.',
+                'backbone.', 'layers.',
+                'backbone_jk.', 'jk_linear.', 'jk_attn.',
+                'virtual_node.', 'vn_',
+                'loop_attn_layers.', 'norms.',
+            )
+            kept_keys = [k for k in state_dict.keys() if any(k.startswith(p) for p in backbone_prefixes_load)]
+            dropped_keys = [k for k in state_dict.keys() if k not in kept_keys]
+            state_dict = {k: state_dict[k] for k in kept_keys}
+            print(f"  --reset-heads: kept {len(kept_keys)} backbone keys, dropped {len(dropped_keys)} head keys")
+            if dropped_keys[:3]:
+                print(f"    dropped (first 3): {dropped_keys[:3]}")
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
         if missing:
             print(f"  Missing keys (randomly initialized): {len(missing)} keys")
         if unexpected:
             print(f"  Unexpected keys (ignored): {unexpected}")
-        print(f"Loaded pre-trained weights from {args.checkpoint} (epoch {ckpt.get('epoch', '?')}, val_loss {ckpt.get('val_loss', '?'):.4f})")
+        _val_loss_disp = ckpt.get('val_loss', None)
+        if _val_loss_disp is None:
+            _val_loss_disp = ckpt.get('val_v', '?')
+        if isinstance(_val_loss_disp, float):
+            _val_loss_disp = f'{_val_loss_disp:.4f}'
+        print(f"Loaded pre-trained weights from {args.checkpoint} (epoch {ckpt.get('epoch', '?')}, val_loss {_val_loss_disp})")
+
+        # ── Reset BatchNorm running statistics. The pretrain corpus has a
+        # different activation distribution (different graph topologies → different
+        # aggregation magnitudes), so the stored running_mean/var are wrong for
+        # the new dataset. Keep the learned weight/bias (gamma/beta) — those
+        # adapt fast through gradients — but reset the buffers so BN re-learns
+        # the right statistics from the new data.
+        if not getattr(args, 'no_bn_reset', False):
+            n_bn = 0
+            for m in model.modules():
+                if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+                    if m.running_mean is not None:
+                        m.running_mean.zero_()
+                    if m.running_var is not None:
+                        m.running_var.fill_(1.0)
+                    if m.num_batches_tracked is not None:
+                        m.num_batches_tracked.zero_()
+                    n_bn += 1
+            print(f"  Reset BatchNorm running statistics in {n_bn} BN layers (gamma/beta preserved)")
 
         # Backbone parameter names: GNN layers, JK, virtual node, input projection
         backbone_prefixes = ('layers.', 'jk_linear.', 'jk_attn.', 'input_proj.', 'input_linear.',
                              'vn_', 'virtual_node', 'norms.')
 
-        if getattr(args, 'freeze_backbone', False):
-            # Phase 1 of fine-tuning: freeze backbone, train heads only
+        # Determine if we should freeze the backbone now: either fully (--freeze-backbone)
+        # or just for the head-warmup window (--freeze-backbone-epochs N).
+        freeze_for_warmup = getattr(args, 'freeze_backbone_epochs', 0) > 0
+        if getattr(args, 'freeze_backbone', False) or freeze_for_warmup:
             frozen_count = 0
             trainable_count = 0
             for name, param in model.named_parameters():
@@ -714,7 +825,9 @@ def main():
                     frozen_count += param.numel()
                 else:
                     trainable_count += param.numel()
-            print(f"Backbone FROZEN: {frozen_count:,} params")
+            stage_label = ('FROZEN for entire run' if getattr(args, 'freeze_backbone', False)
+                           else f'FROZEN for first {args.freeze_backbone_epochs} epochs (head warmup)')
+            print(f"Backbone {stage_label}: {frozen_count:,} params")
             print(f"Heads trainable: {trainable_count:,} params")
         else:
             # Phase 2 of fine-tuning: all params trainable with discriminative LR
@@ -745,7 +858,9 @@ def main():
     use_fused = torch.cuda.is_available()
     uw_params = list(uncertainty_weights.parameters()) if uncertainty_weights is not None else []
 
-    if getattr(args, 'phase2', False) or (getattr(args, 'finetune', False) and getattr(args, 'freeze_backbone', False)):
+    freeze_warmup_epochs = int(getattr(args, 'freeze_backbone_epochs', 0))
+    in_freeze_warmup = (getattr(args, 'finetune', False) and freeze_warmup_epochs > 0)
+    if getattr(args, 'phase2', False) or (getattr(args, 'finetune', False) and getattr(args, 'freeze_backbone', False)) or in_freeze_warmup:
         # Only optimize trainable (unfrozen) parameters
         trainable_params = [p for p in model.parameters() if p.requires_grad] + uw_params
         optimizer = torch.optim.Adam(trainable_params, lr=args.lr, weight_decay=weight_decay, eps=adam_eps, fused=use_fused)
@@ -825,6 +940,7 @@ def main():
     kcl_mode = getattr(args, 'kcl_mode', 'logsumexp')
     kcl_exclusive = getattr(args, 'kcl_exclusive', False)
     kcl_detach_backbone = getattr(args, 'kcl_detach_backbone', False)
+    kcl_mask_unsupervised = getattr(args, 'kcl_mask_unsupervised', True)
     kcl_violation_threshold = getattr(args, 'kcl_violation_threshold', 0.0)
     kcl_huber_delta = getattr(args, 'kcl_huber_delta', 0.0)
     kcl_gt_filter = getattr(args, 'kcl_gt_filter', 0.1)
@@ -834,6 +950,8 @@ def main():
     kcl_intermediate_weight = getattr(args, 'kcl_intermediate_weight', 0.0)
     vov_loss_weight = getattr(args, 'vov_loss_weight', 0.0)
     vth_loss_weight = getattr(args, 'vth_loss_weight', 0.0)
+    vdiff_loss_weight = getattr(args, 'vdiff_loss_weight', 0.0)
+    vgsvds_loss_weight = getattr(args, 'vgsvds_loss_weight', 0.0)
     # Physics constraint config (diff pair, current mirrors)
     constraint_weight_target = getattr(args, 'constraint_weight', 0.0)
     constraint_warmup_epochs = getattr(args, 'constraint_warmup_epochs', 0)
@@ -866,7 +984,8 @@ def main():
     gm_physics_loss_warmup_epochs = getattr(args, 'gm_physics_loss_warmup_epochs', 0)
     gm_physics_loss_start_epoch_cfg = getattr(args, 'gm_physics_loss_start_epoch', 0)
     gm_physics_min_vov = getattr(args, 'gm_physics_min_vov', 0.0)
-    gm_physics_use_clm = getattr(args, 'gm_physics_use_clm', False)
+    gm_physics_use_clm = getattr(args, "gm_physics_use_clm", False)
+    gm_physics_use_smaxt = getattr(args, "gm_physics_use_smaxt", False)
     gm_physics_use_gt_voltages = getattr(args, 'gm_physics_use_gt_voltages', True)
 
     # AC prediction loss config
@@ -997,6 +1116,38 @@ def main():
 
     pbar = tqdm(range(args.epochs), desc="Training")
     for epoch in pbar:
+        # Progressive unfreeze: at the start of `freeze_backbone_epochs`, the
+        # backbone is frozen and the optimizer only contains heads. At that
+        # epoch boundary, unfreeze backbone params and rebuild the optimizer
+        # so backbone gradients start flowing.
+        if (in_freeze_warmup and epoch == freeze_warmup_epochs
+                and not getattr(args, 'freeze_backbone', False)):
+            backbone_prefixes = (
+                'layers.', 'jk_linear.', 'jk_attn.', 'input_proj.', 'input_linear.',
+                'vn_', 'virtual_node', 'norms.',
+            )
+            backbone_params = []
+            head_params = []
+            for name, param in model.named_parameters():
+                param.requires_grad = True
+                if any(name.startswith(p) for p in backbone_prefixes):
+                    backbone_params.append(param)
+                else:
+                    head_params.append(param)
+            optimizer = torch.optim.Adam([
+                {'params': backbone_params, 'lr': args.lr * args.backbone_lr_scale},
+                {'params': head_params + uw_params, 'lr': args.lr},
+            ], weight_decay=weight_decay, eps=adam_eps, fused=use_fused)
+            scheduler = create_scheduler(
+                optimizer, args.scheduler, args.epochs - epoch, args.warmup,
+                min_lr=getattr(args, 'end_lr', 1e-6),
+                plateau_factor=getattr(args, 'plateau_factor', 0.5),
+                plateau_patience=getattr(args, 'plateau_patience', 10),
+            )
+            print(f"\n[epoch {epoch}] UNFROZE backbone — rebuilt optimizer with "
+                  f"backbone_lr={args.lr * args.backbone_lr_scale:.2e}, "
+                  f"head_lr={args.lr:.2e}, scheduler reset")
+
         # Variant rotation (skip if using all variants per epoch)
         if variant_config['enabled'] and epoch > 0 and not all_variants_per_epoch:
             variant_id = epoch % variant_config['num_variants']
@@ -1138,7 +1289,7 @@ def main():
             vdc_mean=vdc_mean, vdc_std=vdc_std,
             stage2_nodes=stage2_nodes, stage2_weight=stage2_weight, node_weights=node_weights,
             use_terminal_voltage_loss=use_terminal_voltage_loss,
-            gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm,
+            gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm, gm_physics_use_smaxt=gm_physics_use_smaxt,
             gm_physics_use_gt_voltages=gm_physics_use_gt_voltages,
             ss_gm_mean=ss_gm_mean if has_ss else 0.0, ss_gm_std=ss_gm_std if has_ss else 1.0,
             ss_gds_mean=ss_gds_mean if has_ss else 0.0, ss_gds_std=ss_gds_std if has_ss else 1.0,
@@ -1152,6 +1303,7 @@ def main():
             kcl_mode=kcl_mode,
             kcl_exclusive=kcl_exclusive,
             kcl_detach_backbone=kcl_detach_backbone,
+            kcl_mask_unsupervised=kcl_mask_unsupervised,
             kcl_violation_threshold=kcl_violation_threshold,
             kcl_huber_delta=kcl_huber_delta,
             kcl_gt_filter=kcl_gt_filter,
@@ -1175,6 +1327,10 @@ def main():
             mirror_pair_indices=mirror_pair_indices,
             mirror_pair_ratios=mirror_pair_ratios,
             mirror_pair_names=mirror_pair_names,
+            vdiff_loss_weight=vdiff_loss_weight,
+            vgsvds_loss_weight=vgsvds_loss_weight,
+            vgsvds_mean=vgsvds_mean,
+            vgsvds_std=vgsvds_std,
         )
 
         mae_mv = mae_norm * vdc_std * 1000
@@ -1211,7 +1367,7 @@ def main():
                 constraint_weight=constraint_weight,
                 stage2_nodes=stage2_nodes, stage2_weight=stage2_weight, node_weights=node_weights,
                 use_terminal_voltage_loss=use_terminal_voltage_loss,
-                gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm,
+                gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm, gm_physics_use_smaxt=gm_physics_use_smaxt,
                 gm_physics_use_gt_voltages=gm_physics_use_gt_voltages,
                 ss_gm_mean=ss_gm_mean if has_ss else 0.0, ss_gm_std=ss_gm_std if has_ss else 1.0,
                 ss_gds_mean=ss_gds_mean if has_ss else 0.0, ss_gds_std=ss_gds_std if has_ss else 1.0,
@@ -1225,6 +1381,7 @@ def main():
                 kcl_mode=kcl_mode,
                 kcl_exclusive=kcl_exclusive,
                 kcl_detach_backbone=kcl_detach_backbone,
+            kcl_mask_unsupervised=kcl_mask_unsupervised,
                 kcl_violation_threshold=kcl_violation_threshold,
                 kcl_huber_delta=kcl_huber_delta,
                 kcl_gt_filter=kcl_gt_filter,
@@ -1267,8 +1424,21 @@ def main():
             val_current_maes.append(val_c_mae)
             val_hc_mirror_losses.append(val_hc_mirror_loss)
 
+            # Schedule plateau on the SUPERVISED components only (V+I+SS+DC_gain),
+            # excluding KCL and other physics regularizers. These can ramp in mid-
+            # training (e.g. kcl_warmup) and would otherwise spuriously trigger LR
+            # reductions just because the loss landscape changed, not because the
+            # model regressed on what we actually care about.
+            v_w = getattr(args, 'voltage_weight', 1.0)
+            val_loss_sched = (
+                v_w * val_v_loss
+                + current_weight * val_c_loss
+                + ss_gm_loss_weight * val_ss_gm_loss
+                + ss_gds_loss_weight * val_ss_gds_loss
+                + dc_gain_loss_weight * val_dc_gain_loss
+            )
             if epoch >= args.warmup:
-                step_scheduler(scheduler, args.scheduler, val_loss)
+                step_scheduler(scheduler, args.scheduler, val_loss_sched)
 
             # Compute composite score: V@5% + I@5% + gm@10% + gds@10%
             composite_score = 0.0
@@ -1284,16 +1454,20 @@ def main():
                 composite_score = vr.get(5, 0) + ir.get(5, 0) + gm_acc + gds_acc + gm_id_acc
                 if dc_gain_loss_weight > 0:
                     composite_score += val_rel_metrics.get('dc_gain_acc_3dB', 0)
+                if ac_loss_weight > 0:
+                    ugbw_acc = val_rel_metrics.get('ugbw_acc', {})
+                    composite_score += ugbw_acc.get(5, 0)
                 use_composite = composite_score > 0
 
             if use_composite:
                 improved = composite_score > best_composite_score + 0.1
             else:
-                improved = val_loss < best_val_loss - 1e-4
+                # Use supervised-only loss for best-tracking too, same reason as scheduler.
+                improved = val_loss_sched < best_val_loss - 1e-4
 
             if improved:
                 best_composite_score = max(best_composite_score, composite_score)
-                best_val_loss, best_epoch = val_loss, epoch
+                best_val_loss, best_epoch = val_loss_sched, epoch
                 best_model_state = model.state_dict()
                 epochs_without_improvement = 0
                 best_metrics.update(val_mae_mv=val_mae_mv, val_current_mae_ua=val_c_mae, acc80=acc80, acc50=acc50, acc20=acc20, acc10=acc10,
@@ -1338,7 +1512,7 @@ def main():
                     loss_type=loss_type, huber_delta=huber_delta, constraint_weight=constraint_weight,
                     stage2_nodes=stage2_nodes, stage2_weight=stage2_weight, node_weights=node_weights,
                     use_terminal_voltage_loss=use_terminal_voltage_loss,
-                    gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm,
+                    gm_physics_loss_weight=gm_physics_loss_weight, gm_physics_min_vov=gm_physics_min_vov, gm_physics_use_clm=gm_physics_use_clm, gm_physics_use_smaxt=gm_physics_use_smaxt,
                     ss_gm_mean=ss_gm_mean if has_ss else 0.0, ss_gm_std=ss_gm_std if has_ss else 1.0,
                     ss_gds_mean=ss_gds_mean if has_ss else 0.0, ss_gds_std=ss_gds_std if has_ss else 1.0,
                     ac_loss_weight=ac_loss_weight, ac_mean=ac_mean, ac_std=ac_std, ac_components=ac_components,
@@ -1408,7 +1582,7 @@ def main():
                                 current_mean=current_mean,
                                 current_std=current_std,
                                 gt_currents=_vb.node_current_targets if hasattr(_vb, 'node_current_targets') else None,
-                                kcl_include_mask=getattr(_vb, 'kcl_include_mask', None),
+                                kcl_include_mask=(getattr(_vb, 'kcl_include_mask', None) & _vb.has_current_mask) if (getattr(_vb, 'kcl_include_mask', None) is not None and kcl_mask_unsupervised) else getattr(_vb, 'kcl_include_mask', None),
                                 return_stats=True,
                                 kcl_mode=kcl_mode,
                             )
@@ -1417,6 +1591,9 @@ def main():
                         if hasattr(_vb, 'node_names') and _vb.node_names is not None:
                             _n_graphs = len(_vb.ptr) - 1
                             _pred_accum = {}
+                            _kcl_inc_mask = getattr(_vb, 'kcl_include_mask', None)
+                            if _kcl_inc_mask is not None and kcl_mask_unsupervised:
+                                _kcl_inc_mask = _kcl_inc_mask & _vb.has_current_mask
                             _common_args = dict(
                                 edge_index=_vb.edge_index,
                                 num_terminals=_vb.num_terminals,
@@ -1425,7 +1602,7 @@ def main():
                                 terminal_current_sign=getattr(_vb, 'terminal_current_sign', None),
                                 current_mean=current_mean,
                                 current_std=current_std,
-                                kcl_include_mask=getattr(_vb, 'kcl_include_mask', None),
+                                kcl_include_mask=_kcl_inc_mask,
                                 node_names=_vb.node_names,
                             )
                             for _gi in range(_n_graphs):

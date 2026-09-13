@@ -439,6 +439,166 @@ class TowerGENConv(BaseGNN):
 
         self.hidden_dim = hidden_dim
         self.node_feature_dim = node_feature_dim
+        # IV embedder: pretrained autoencoder over MOSFET I_D(Vgs,Vds) surfaces.
+        # When enabled, a 64-d embedding is concat'd per MOSFET terminal at the
+        # input (non-MOSFET nodes get zeros). This grows the input projection's
+        # width by IVEmbedder.EMBED_DIM, so node_feature_dim is adjusted below.
+        # LUT-based current derivation: replace the learned current head
+        # with a physics-exact id lookup from predicted per-MOSFET voltages.
+        # Gradients flow through (Vgs, Vds, Vbs) back into the voltage head.
+        lut_cur_cfg = kwargs.get('lut_current_config') or {}
+        self.use_lut_current = bool(lut_cur_cfg.get('enabled', False))
+        if self.use_lut_current:
+            from ..components.lut_id_query import LUTIdQuery
+            self.lut_id_query = LUTIdQuery(lut_cur_cfg['lut_path'])
+            print(f'[LUTCurrent] enabled from {lut_cur_cfg["lut_path"]!r}: '
+                  f'currents derived from predicted V via physics-exact LUT lookup')
+        else:
+            self.lut_id_query = None
+
+        # Iterative-refinement LUT op-point features (Option A3). Each batch
+        # carries `node_lut_features` [N, 3] (log-z-scored id, gm, gds at the
+        # predicted operating point from a frozen pass-1 baseline). We concat
+        # those 3 scalars onto the input only — skip/heads stay at the
+        # original width, same rationale as the IV option-1 wiring.
+        lut_op_cfg = kwargs.get('lut_op_features_config') or {}
+        self.use_lut_op_features = bool(lut_op_cfg.get('enabled', False))
+        if self.use_lut_op_features:
+            self._lut_op_dim = 3
+            print(f'[LUTOpFeatures] enabled: '
+                  f'input_linear in_features {node_feature_dim} -> '
+                  f'{node_feature_dim + 3} (+3); skip/heads stay at '
+                  f'{node_feature_dim}')
+        else:
+            self._lut_op_dim = 0
+
+        # Stacking variant: pass the frozen baseline's own predictions as
+        # extra per-node input features [V₀, I₀, gm₀, gds₀]. Same wiring as
+        # lut_op_features; expects `data.node_stack_features` shape [N, 4].
+        stack_cfg = kwargs.get('stack_features_config') or {}
+        self.use_stack_features = bool(stack_cfg.get('enabled', False))
+        if self.use_stack_features:
+            self._stack_dim = 4
+            print(f'[StackFeatures] enabled: input_linear in_features '
+                  f'{node_feature_dim} -> {node_feature_dim + 4} (+4); '
+                  f'skip/heads stay at {node_feature_dim}')
+        else:
+            self._stack_dim = 0
+
+        # End-to-end LUT-residual: like dc_gain physics, the LUT is a
+        # physics layer inside the model. Heads predict residuals on top
+        # of the LUT-anchored prediction. No separate baseline / patcher
+        # needed — single model, single training run, single forward at
+        # inference (the model queries the LUT internally on its own V_pred).
+        lut_res_cfg = kwargs.get('lut_residual_config') or {}
+        self.use_lut_residual = bool(lut_res_cfg.get('enabled', False))
+        self._lut_residual_detach_v = bool(lut_res_cfg.get('detach_v', True))
+        # Don't apply LUT residual until V has settled — LUT(V_random) at
+        # init is wildly off, scrambles head outputs, and explodes gradients.
+        self._lut_residual_warmup_epochs = int(lut_res_cfg.get('warmup_epochs', 200))
+        # After warmup, ramp the LUT anchor weight 0→1 over this many epochs
+        # to avoid a jump-discontinuity in the loss when LUT switches on (the
+        # heads were trained as absolute predictors during warmup, suddenly
+        # adding a LUT anchor ≈ doubling the prediction → huge loss spike).
+        self._lut_residual_ramp_epochs = int(lut_res_cfg.get('ramp_epochs', 100))
+        if self.use_lut_residual:
+            # Lazy-load the LUT module only when warmup ends. Allocating 28 GB
+            # of GPU buffers at __init__ would change PyTorch's memory layout
+            # vs baseline → different non-deterministic scatter ordering →
+            # different training trajectory before LUT residual even fires.
+            self._lut_residual_path = lut_res_cfg['lut_path']
+            self.lut_residual_query = None  # built lazily in _apply_lut_residual
+            print(f'[LUTResidual] enabled from {self._lut_residual_path!r}: '
+                  f'detach_v={self._lut_residual_detach_v}, '
+                  f'warmup_epochs={self._lut_residual_warmup_epochs}; '
+                  f'heads predict residual on top of LUT-anchored (id, gm, gds). '
+                  f'LUT will be loaded lazily after warmup.')
+        else:
+            self.lut_residual_query = None
+
+        # MOSFET physical descriptor: 5-dim per-MOSFET signature from LUT
+        # at canonical bias points. Hand-crafted alternative to IV embedder.
+        # Same wiring as IV: feeds input_linear only, skip/heads unchanged.
+        # Per MOSFET:
+        #   [0] log10(Id) at (Vgs=0.7, Vds=0.9, Vbs=0)
+        #   [1] log10(gm) at same point
+        #   [2] log10(gds) at same point
+        #   [3] Vth at Vbs=0
+        #   [4] log10(gm) at (Vgs=0.5, Vds=0.5, Vbs=0)
+        desc_cfg = kwargs.get('mosfet_descriptor_config') or {}
+        self.use_mosfet_descriptor = bool(desc_cfg.get('enabled', False))
+        if self.use_mosfet_descriptor:
+            # Configurable dim — matches the patcher's output (5 or 12 currently)
+            self._descriptor_dim = int(desc_cfg.get('dim', 12))
+            print(f'[MosfetDescriptor] enabled: input_linear in_features '
+                  f'{node_feature_dim} -> {node_feature_dim + self._descriptor_dim} '
+                  f'(+{self._descriptor_dim}); skip/heads stay at {node_feature_dim}')
+        else:
+            self._descriptor_dim = 0
+
+        # MOSFET functional role: per-MOSFET one-hot encoding of "what role
+        # does this transistor play in the circuit" (input pair, bias mirror,
+        # output stage, etc.). Strong structural prior. Same wiring as descriptor.
+        role_cfg = kwargs.get('mosfet_role_config') or {}
+        self.use_mosfet_role = bool(role_cfg.get('enabled', False))
+        if self.use_mosfet_role:
+            self._role_dim = int(role_cfg.get('dim', 7))
+            print(f'[MosfetRole] enabled: input_linear in_features '
+                  f'{node_feature_dim} -> {node_feature_dim + self._role_dim} '
+                  f'(+{self._role_dim}); skip/heads stay at {node_feature_dim}')
+        else:
+            self._role_dim = 0
+
+        # Per-net role one-hot: tells the model "this NET is VDD/GND/SIG_IN/
+        # SIG_OUT/INTERNAL". Stored on the node (zeros for terminal nodes).
+        net_role_cfg = kwargs.get('net_role_config') or {}
+        self.use_net_role = bool(net_role_cfg.get('enabled', False))
+        if self.use_net_role:
+            self._net_role_dim = int(net_role_cfg.get('dim', 5))
+            print(f'[NetRole] enabled: input_linear in_features '
+                  f'+{self._net_role_dim} dims for net role one-hot')
+        else:
+            self._net_role_dim = 0
+
+        # IV embedder: the per-MOSFET embedding feeds into input_linear ONLY.
+        # The skip/residual pathway (which propagates node_feature_dim into
+        # every head) stays at the original width — otherwise adding IV
+        # balloons the SS/current/voltage heads by ~400 k params and the
+        # extra capacity just overfits on 5 k samples.
+        iv_cfg = kwargs.get('iv_embedder_config') or {}
+        self.use_iv_embedder = bool(iv_cfg.get('enabled', False))
+        if self.use_iv_embedder:
+            from ..components.iv_embedder import IVEmbedder
+            iv_freeze = bool(iv_cfg.get('freeze', True))
+            iv_use_vbs = bool(iv_cfg.get('use_vbs', False))
+            # If True, zero out the W/L/wl_ratio/M slots of MOSFET terminal
+            # nodes so the model sees ONLY the IV embedding as their device
+            # signature. Non-MOSFET terminals keep their (DC/value) features.
+            self._iv_replace_mosfet_props = bool(iv_cfg.get('replace_mosfet_props', False))
+            self.iv_embedder = IVEmbedder(
+                run_dir=iv_cfg['run_dir'],
+                lut_path=iv_cfg.get('lut_path'),
+                freeze=iv_freeze,
+                use_vbs=iv_use_vbs,
+            )
+            self._iv_embed_dim = self.iv_embedder.embed_dim
+            print(f'[IVEmbedder] enabled from {iv_cfg["run_dir"]!r}: '
+                  f'bottleneck={self._iv_embed_dim}, freeze={iv_freeze}, '
+                  f'use_vbs={iv_use_vbs}, '
+                  f'replace_mosfet_props={self._iv_replace_mosfet_props}; '
+                  f'input_linear in_features {node_feature_dim} -> '
+                  f'{node_feature_dim + self._iv_embed_dim} '
+                  f'(+{self._iv_embed_dim}); skip/heads stay at '
+                  f'{node_feature_dim}')
+        else:
+            self.iv_embedder = None
+            self._iv_embed_dim = 0
+        # node_feature_dim is NOT mutated; it defines the skip width.
+        # A separate _input_proj_dim sizes input_linear.
+        self._input_proj_dim = (node_feature_dim + self._iv_embed_dim
+                                 + self._lut_op_dim + self._stack_dim
+                                 + self._descriptor_dim + self._role_dim
+                                 + self._net_role_dim)
         self.act_type = kwargs.get('act_type', 'relu')
         self.conv_type = kwargs.get('conv_type', 'genconv')
         self.conv_num_heads = kwargs.get('conv_num_heads', 4)
@@ -449,6 +609,15 @@ class TowerGENConv(BaseGNN):
         self.use_device_pooling_current = use_device_pooling_current
         self.gradient_checkpointing = gradient_checkpointing
         self.use_edge_features = use_edge_features
+        self._edge_feature_dim = edge_feature_dim
+        # Optional: explicit list of edge dim indices to use (overrides _edge_feature_dim).
+        # Pulled from kwargs so it doesn't break older call sites.
+        _idx = kwargs.get('edge_feature_indices')
+        if _idx is not None:
+            self.register_buffer('_edge_feature_indices',
+                                 torch.tensor(list(_idx), dtype=torch.long), persistent=False)
+        else:
+            self._edge_feature_indices = None
         self.input_dropout = input_dropout
         self.norm_type = norm_type
         self.use_virtual_node = use_virtual_node
@@ -463,8 +632,8 @@ class TowerGENConv(BaseGNN):
         state_tower_jk_config = state_tower_jk_config or {}
         sensitivity_tower_jk_config = sensitivity_tower_jk_config or {}
 
-        # Input projection
-        self.input_linear = nn.Linear(node_feature_dim, hidden_dim)
+        # Input projection — widens when IV embedder is on.
+        self.input_linear = nn.Linear(self._input_proj_dim, hidden_dim)
 
         # Edge feature dimension
         edge_dim = edge_feature_dim if use_edge_features else None
@@ -475,7 +644,17 @@ class TowerGENConv(BaseGNN):
             for _ in range(backbone_layers)
         ])
 
-        # Virtual Node (backbone only)
+        # Virtual Node — applied to backbone only by default; set vn_apply_to='all'
+        # to also fire in state_tower and sensitivity_tower.
+        self.vn_apply_to = kwargs.get('vn_apply_to', 'backbone')
+        if self.vn_apply_to == 'all':
+            _vn_total_layers = backbone_layers + state_tower_layers + sensitivity_tower_layers
+            self._vn_state_layer_offset = backbone_layers
+            self._vn_sens_layer_offset = backbone_layers + state_tower_layers
+        else:
+            _vn_total_layers = backbone_layers
+            self._vn_state_layer_offset = 0
+            self._vn_sens_layer_offset = 0
         if use_virtual_node:
             self.virtual_node = VirtualNode(
                 hidden_dim=hidden_dim,
@@ -485,7 +664,7 @@ class TowerGENConv(BaseGNN):
                 mode=vn_mode,
                 num_heads=vn_num_heads,
                 head_dim=vn_head_dim,
-                num_layers=backbone_layers,
+                num_layers=_vn_total_layers,
                 act_type=self.act_type,
             )
         else:
@@ -556,6 +735,17 @@ class TowerGENConv(BaseGNN):
         v_hidden = voltage_head_config.get('hidden_dim', hidden_dim)
         v_dropout = voltage_head_config.get('dropout', 0.0)
         self.voltage_head = build_mlp(v_layers, mlp_input_dim, v_hidden, 1, norm_type, v_dropout, act_type=self.act_type)
+
+        # Net-only self-attention (applied to state_hidden before V head)
+        net_attn_cfg = kwargs.get('net_attention_config', {}) or voltage_head_config.get('net_attention', {})
+        self.use_net_attention = bool(net_attn_cfg.get('enabled', False))
+        if self.use_net_attention:
+            from src.gnn.components.net_self_attention import NetSelfAttention
+            self.net_attention = NetSelfAttention(
+                hidden_dim=hidden_dim,
+                num_heads=int(net_attn_cfg.get('num_heads', 4)),
+                dropout=float(net_attn_cfg.get('dropout', 0.0)),
+            )
 
         # Vgs/Vds prediction head (optional)
         vgsvds_cfg = kwargs.get('vgsvds_config', {})
@@ -1085,7 +1275,12 @@ class TowerGENConv(BaseGNN):
                     if not hasattr(self, '_dc_r_in'):
                         self.register_buffer('_dc_r_in', torch.tensor(r_in))
                         self.register_buffer('_dc_r_f', torch.tensor(r_f))
-                    self._ac_cap_local_idx = 110  # C0 positive terminal (fixed topology)
+                    # Cc is the compensation cap's positive terminal in the
+                    # local single-graph node space — differs per topology.
+                    # v9 closed-loop = 110, openloop = 106. Set via config.
+                    self._ac_cap_local_idx = int(ac_head_config.get('cap_local_idx', 110))
+                    # Openloop: β=1 (no feedback factor)
+                    self._ac_openloop = bool(ac_head_config.get('openloop', False))
                     self._ac_cc_log10_min = math.log10(0.5e-12)
                     self._ac_cc_log10_range = math.log10(30e-12) - math.log10(0.5e-12)
                     ac_physics_dim = 30  # 14 z_gm + 14 z_gds + Cc_norm + log10_ugbw_est
@@ -1256,6 +1451,9 @@ class TowerGENConv(BaseGNN):
                 self.register_buffer('_dc_mosfet_indices', torch.tensor(
                     [8, 9, 5, 6, 12, 13, 10, 11, 7, 19, 20, 21, 22, 23], dtype=torch.long))
                 self.dc_gain_detach_ss = dc_gain_config.get('detach_ss', False)
+                # Open-loop topology: skip beta and R_load (no feedback network).
+                # A_total = A1 * Rout3 * (gm_out + A2*gm_cascode), no feedback.
+                self._dc_gain_openloop = bool(dc_gain_config.get('openloop', False))
                 # Register SS normalization buffers if not already present (needed for denormalization)
                 if not hasattr(self, 'ss_gm_mean_buf'):
                     self.register_buffer('ss_gm_mean_buf', torch.tensor(0.0))
@@ -1274,6 +1472,15 @@ class TowerGENConv(BaseGNN):
                 self.dc_gain_use_volt_ctx = dc_gain_config.get('use_voltage_context', False)
                 if self.dc_gain_use_volt_ctx:
                     dc_physics_dim += 28  # 14 Vgs + 14 Vds
+                # gm/Id ratio context: log10(gm) - log10(Id) per signal-path MOSFET.
+                # Both gm and current are already supervised → no leakage at inference.
+                self.dc_gain_use_gm_id_ctx = dc_gain_config.get('use_gm_id_context', False)
+                if self.dc_gain_use_gm_id_ctx:
+                    dc_physics_dim += 14  # 14 log10(gm/Id) for the key MOSFETs
+                    # Need current normalization buffers for de-z-scoring node_currents.
+                    if not hasattr(self, 'current_mean_buf'):
+                        self.register_buffer('current_mean_buf', torch.tensor(0.0))
+                        self.register_buffer('current_std_buf', torch.tensor(1.0))
                 if self.dc_gain_use_vn:
                     dc_vn_proj_dim = dc_gain_config.get('vn_projection_dim', 0)
                     if dc_vn_proj_dim > 0:
@@ -1370,6 +1577,7 @@ class TowerGENConv(BaseGNN):
                     self.register_buffer('ss_gm_std_buf', torch.tensor(1.0))
                     self.register_buffer('ss_gds_mean_buf', torch.tensor(0.0))
                     self.register_buffer('ss_gds_std_buf', torch.tensor(1.0))
+                self._dc_gain_openloop = bool(dc_gain_config.get('openloop', False))
                 r_in = float(dc_gain_config.get('r_in', 50000.0))
                 r_f = float(dc_gain_config.get('r_f', 50000.0))
                 self.register_buffer('_dc_r_in', torch.tensor(r_in))
@@ -1427,6 +1635,7 @@ class TowerGENConv(BaseGNN):
                     self.register_buffer('ss_gm_std_buf', torch.tensor(1.0))
                     self.register_buffer('ss_gds_mean_buf', torch.tensor(0.0))
                     self.register_buffer('ss_gds_std_buf', torch.tensor(1.0))
+                self._dc_gain_openloop = bool(dc_gain_config.get('openloop', False))
                 r_in = float(dc_gain_config.get('r_in', 50000.0))
                 r_f = float(dc_gain_config.get('r_f', 50000.0))
                 self.register_buffer('_dc_r_in', torch.tensor(r_in))
@@ -1445,18 +1654,29 @@ class TowerGENConv(BaseGNN):
                 )
                 # Learned MLP from 14 MOSFET embeddings
                 concat_input_dim = 14 * mlp_input_dim  # 2086
+                _learned_dropout = float(dc_gain_config.get('learned_dropout', 0.0))
+                _zero_init = bool(dc_gain_config.get('zero_init_residual', False))
                 self.dc_gain_learned_head = nn.Sequential(
                     nn.Linear(concat_input_dim, 512),
                     nn.LayerNorm(512),
                     get_activation(self.act_type),
+                    nn.Dropout(_learned_dropout) if _learned_dropout > 0 else nn.Identity(),
                     nn.Linear(512, 256),
                     nn.LayerNorm(256),
                     get_activation(self.act_type),
+                    nn.Dropout(_learned_dropout) if _learned_dropout > 0 else nn.Identity(),
                     nn.Linear(256, 128),
                     nn.LayerNorm(128),
                     get_activation(self.act_type),
+                    nn.Dropout(_learned_dropout) if _learned_dropout > 0 else nn.Identity(),
                     nn.Linear(128, 1),
                 )
+                if _zero_init:
+                    # Force initial learned_pred = 0 so the model starts at
+                    # physics_pred and has to *earn* any deviation.
+                    last_linear = self.dc_gain_learned_head[-1]
+                    nn.init.zeros_(last_linear.weight)
+                    nn.init.zeros_(last_linear.bias)
                 if self.dc_gain_mode == 'physics_gated':
                     self.dc_gain_gate = nn.Sequential(
                         nn.Linear(2, 1),
@@ -1545,6 +1765,7 @@ class TowerGENConv(BaseGNN):
         num_graphs: Optional[int] = None,
         use_vn: bool = False,
         vn_emb: Optional[torch.Tensor] = None,
+        vn_layer_offset: int = 0,                    # NEW: offset for per-layer VN-MHA module index
         # Loop attention (optional)
         loop_attn_layers: Optional[nn.ModuleList] = None,
         loop_attn_offset: int = 0,
@@ -1580,15 +1801,35 @@ class TowerGENConv(BaseGNN):
         vn_is_mha = use_vn and self.virtual_node is not None and self.virtual_node.mode == 'mha'
         vn_is_default = use_vn and self.virtual_node is not None and self.virtual_node.mode == 'default' and vn_emb is not None
 
+        # For mixed-topology batches (e.g., supervised pretrain with 4 topos),
+        # the VN MHA can't reshape uniformly. We split MHA per-topo-block if
+        # the data carries `topo_node_slices` (set by PretrainCombinedLoader).
+        # Falls back to the standard uniform-batch path for normal training.
+        topo_slices = None
+        # Look up topo_node_slices via the closure — not available here, but
+        # batch carries it. We need to pass batch.topo_node_slices through.
+        # Detect by checking if batch tensor has > 1 unique node-count groups.
+
         for layer_idx, layer in enumerate(layers):
+            vn_idx = vn_layer_offset + layer_idx
             # Global context: MHA or default VN broadcast
             if vn_is_mha:
-                mha_out = self.virtual_node.global_mha(x, batch, layer_idx=layer_idx)
+                if hasattr(self, '_topo_slices_for_mha') and self._topo_slices_for_mha is not None:
+                    # Per-topo MHA splitting (mixed-topology batches)
+                    mha_out = torch.zeros_like(x)
+                    for (start, end, _, _) in self._topo_slices_for_mha.values():
+                        x_slice = x[start:end]
+                        bs = batch[start:end] - batch[start]
+                        mha_out[start:end] = self.virtual_node.global_mha(
+                            x_slice, bs, layer_idx=vn_idx,
+                        )
+                else:
+                    mha_out = self.virtual_node.global_mha(x, batch, layer_idx=vn_idx)
                 x = x + mha_out
                 if capture_mha:
                     mha_outputs.append(mha_out)
             elif vn_is_default:
-                x = x + self.virtual_node.broadcast(vn_emb, batch, layer_idx=layer_idx)
+                x = x + self.virtual_node.broadcast(vn_emb, batch, layer_idx=vn_idx)
 
             # Message passing
             if self.gradient_checkpointing and self.training:
@@ -1832,25 +2073,356 @@ class TowerGENConv(BaseGNN):
         # Now replicate for this batch
         return self._get_loop_data(data)
 
+    def _zero_mosfet_props(self, x_in: torch.Tensor, data) -> torch.Tensor:
+        """Return a copy of x_in with the first 4 feature columns
+        (W, L, wl_ratio, M) zeroed at every MOSFET terminal node. Non-MOSFET
+        nodes are untouched. Used when the IV embedding should be the only
+        per-device signature for transistors.
+        """
+        term_idx = getattr(data, 'mosfet_terminal_idx', None)
+        if term_idx is None:
+            return x_in
+        device = x_in.device
+        term_idx = term_idx.to(device)
+
+        # Resolve graph-local terminal indices to global node indices
+        ptr = getattr(data, 'ptr', None)
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        M = term_idx.shape[0]
+        if M == 0:
+            return x_in
+        if ptr is not None and mosfet_ptr is not None:
+            from src.training.losses import get_device_graph_idx
+            num_graphs = ptr.shape[0] - 1
+            g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+            node_offsets = ptr[g_idx]
+        else:
+            node_offsets = torch.zeros(M, dtype=torch.long, device=device)
+
+        x_out = x_in.clone()
+        n_props = min(4, x_out.shape[1])
+        for col in range(term_idx.shape[1]):
+            valid = term_idx[:, col] >= 0
+            if valid.any():
+                idx_g = term_idx[valid, col] + node_offsets[valid]
+                x_out[idx_g, :n_props] = 0.0
+        return x_out
+
+    def _compute_iv_features(self, data, num_nodes: int,
+                             dtype: torch.dtype,
+                             device: torch.device) -> torch.Tensor:
+        """Return [num_nodes, iv_dim] IV embedding scattered to MOSFET terminals.
+
+        Non-MOSFET nodes get zeros. Called only when use_iv_embedder is True.
+        """
+        mosfet_info = getattr(data, 'mosfet_info', None)
+        wl_um = getattr(data, 'mosfet_wl_um', None)
+        term_idx = getattr(data, 'mosfet_terminal_idx', None)
+        iv_dim = self._iv_embed_dim
+
+        if (mosfet_info is None or wl_um is None or term_idx is None
+                or mosfet_info.shape[0] == 0):
+            return torch.zeros(num_nodes, iv_dim, device=device, dtype=dtype)
+
+        is_nmos = mosfet_info[:, 6]
+
+        # Pass per-device Vbs if the embedder was built for it. Fall back to
+        # the Vbs=0 slice when use_vbs=False.
+        vbs = getattr(data, 'mosfet_vbs', None) if getattr(self.iv_embedder, 'use_vbs', False) else None
+        z = self.iv_embedder(wl_um[:, 0], wl_um[:, 1], is_nmos, Vbs=vbs).to(dtype=dtype)
+
+        M = mosfet_info.shape[0]
+        ptr = getattr(data, 'ptr', None)
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        if ptr is not None and mosfet_ptr is not None:
+            from src.training.losses import get_device_graph_idx
+            num_graphs = ptr.shape[0] - 1
+            g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+            node_offsets = ptr[g_idx]
+        else:
+            node_offsets = torch.zeros(M, dtype=torch.long, device=device)
+
+        term_idx = term_idx.to(device)
+        term_global = term_idx + node_offsets.unsqueeze(1)
+        valid = term_idx >= 0
+
+        iv_feat = torch.zeros(num_nodes, iv_dim, device=device, dtype=dtype)
+        for t in range(term_idx.shape[1]):
+            m = valid[:, t]
+            if m.any():
+                iv_feat[term_global[m, t]] = z[m]
+        return iv_feat
+
+    def _compute_role_features(self, data, num_nodes: int,
+                               dtype: torch.dtype,
+                               device: torch.device) -> torch.Tensor:
+        """Return [num_nodes, role_dim] MOSFET role one-hot scattered to MOSFET
+        terminals. Non-MOSFET nodes get zeros. Uses `data.mosfet_role` [M, role_dim].
+        """
+        roles = getattr(data, 'mosfet_role', None)
+        term_idx = getattr(data, 'mosfet_terminal_idx', None)
+        r_dim = self._role_dim
+        if roles is None or term_idx is None or roles.shape[0] == 0:
+            return torch.zeros(num_nodes, r_dim, device=device, dtype=dtype)
+        roles = roles.to(device=device, dtype=dtype)
+        M = roles.shape[0]
+        ptr = getattr(data, 'ptr', None)
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        if ptr is not None and mosfet_ptr is not None:
+            from src.training.losses import get_device_graph_idx
+            num_graphs = ptr.shape[0] - 1
+            g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+            node_offsets = ptr[g_idx]
+        else:
+            node_offsets = torch.zeros(M, dtype=torch.long, device=device)
+        term_idx = term_idx.to(device)
+        term_global = term_idx + node_offsets.unsqueeze(1)
+        valid = term_idx >= 0
+        feat = torch.zeros(num_nodes, r_dim, device=device, dtype=dtype)
+        for t in range(term_idx.shape[1]):
+            m = valid[:, t]
+            if m.any():
+                feat[term_global[m, t]] = roles[m]
+        return feat
+
+    def _compute_descriptor_features(self, data, num_nodes: int,
+                                     dtype: torch.dtype,
+                                     device: torch.device) -> torch.Tensor:
+        """Return [num_nodes, 5] LUT-based MOSFET descriptor scattered to MOSFET
+        terminals. Non-MOSFET nodes get zeros. Called only when
+        use_mosfet_descriptor is True. Requires `data.mosfet_descriptor` [M, 5]
+        from patch_dataset_mosfet_descriptor.py.
+        """
+        descriptor = getattr(data, 'mosfet_descriptor', None)
+        term_idx = getattr(data, 'mosfet_terminal_idx', None)
+        d_dim = self._descriptor_dim
+
+        if descriptor is None or term_idx is None or descriptor.shape[0] == 0:
+            return torch.zeros(num_nodes, d_dim, device=device, dtype=dtype)
+
+        descriptor = descriptor.to(device=device, dtype=dtype)
+        # If patched data has more dims than configured (e.g. data has 12 dims
+        # but model is configured for dim=5), slice to the first d_dim cols.
+        if descriptor.shape[-1] > d_dim:
+            descriptor = descriptor[:, :d_dim]
+        elif descriptor.shape[-1] < d_dim:
+            raise RuntimeError(
+                f'mosfet_descriptor has {descriptor.shape[-1]} dims but model '
+                f'configured for {d_dim} — re-patch with at least {d_dim} dims'
+            )
+
+        M = descriptor.shape[0]
+        ptr = getattr(data, 'ptr', None)
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        if ptr is not None and mosfet_ptr is not None:
+            from src.training.losses import get_device_graph_idx
+            num_graphs = ptr.shape[0] - 1
+            g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+            node_offsets = ptr[g_idx]
+        else:
+            node_offsets = torch.zeros(M, dtype=torch.long, device=device)
+
+        term_idx = term_idx.to(device)
+        term_global = term_idx + node_offsets.unsqueeze(1)
+        valid = term_idx >= 0
+
+        feat = torch.zeros(num_nodes, d_dim, device=device, dtype=dtype)
+        for t in range(term_idx.shape[1]):
+            m = valid[:, t]
+            if m.any():
+                feat[term_global[m, t]] = descriptor[m]
+        return feat
+
+    def _lut_scatter_currents(self, data, result):
+        """Compute per-MOSFET id from predicted V via the SKY130 LUT and
+        scatter |id| in log10-zscored form into result['node_currents'].
+
+        Voltages are z-score normalized (model space) → we denormalize with
+        vdc_mean/vdc_std before feeding the LUT (which expects volts).
+        The LUT returns linear id_total = id_per_finger × M; we log10 z-score
+        it using current_mean/current_std so the downstream loss consumes it
+        just like the learned path did.
+        """
+        v_pred_norm = result['node_voltages']
+        num_nodes = v_pred_norm.shape[0]
+        device = v_pred_norm.device
+
+        mosfet_info = getattr(data, 'mosfet_info', None)
+        wl_um = getattr(data, 'mosfet_wl_um', None)
+        term_idx = getattr(data, 'mosfet_terminal_idx', None)
+        m_m = getattr(data, 'mosfet_m', None)
+
+        # If the batch lacks the supporting tensors, fall back to zeros.
+        if (mosfet_info is None or wl_um is None or term_idx is None
+                or m_m is None or mosfet_info.shape[0] == 0):
+            result['node_currents'] = torch.zeros(num_nodes, device=device, dtype=v_pred_norm.dtype)
+            return
+
+        M = mosfet_info.shape[0]
+        ptr = getattr(data, 'ptr', None)
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        if ptr is not None and mosfet_ptr is not None:
+            from src.training.losses import get_device_graph_idx
+            num_graphs = ptr.shape[0] - 1
+            g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+            node_offsets = ptr[g_idx]
+        else:
+            node_offsets = torch.zeros(M, dtype=torch.long, device=device)
+
+        term_idx = term_idx.to(device)
+        gate_idx   = term_idx[:, 0] + node_offsets
+        drain_idx  = term_idx[:, 1] + node_offsets
+        source_idx = term_idx[:, 2] + node_offsets
+        bulk_idx   = term_idx[:, 3] + node_offsets
+
+        # Denormalize predicted voltages (z-score → volts). Use batch-attached
+        # stats (attach_normalization_stats sets voltage_mean/std per batch).
+        vdc_mean = torch.as_tensor(getattr(data, 'voltage_mean', 0.0),
+                                    device=device, dtype=v_pred_norm.dtype)
+        vdc_std = torch.as_tensor(getattr(data, 'voltage_std', 1.0),
+                                   device=device, dtype=v_pred_norm.dtype).clamp(min=1e-6)
+
+        v_volts = v_pred_norm * vdc_std + vdc_mean
+
+        v_gate   = v_volts[gate_idx]
+        v_drain  = v_volts[drain_idx]
+        v_source = v_volts[source_idx]
+        # Bulk may be missing (-1); fall back to source potential (Vbs=0).
+        v_bulk = torch.where(
+            term_idx[:, 3] >= 0,
+            v_volts[bulk_idx.clamp_min(0)],
+            v_source,
+        )
+
+        Vgs = v_gate - v_source
+        Vds = v_drain - v_source
+        Vbs = v_bulk - v_source
+
+        is_nmos = mosfet_info[:, 6]
+        W_um = wl_um[:, 0].to(device)
+        L_um = wl_um[:, 1].to(device)
+        M_mul = m_m.to(device)
+
+        id_total = self.lut_id_query(W_um, L_um, Vgs, Vds, Vbs, M_mul, is_nmos)  # linear A
+
+        # log10(|id|) → z-score using the running current_mean/current_std so
+        # the existing current loss sees a drop-in replacement for the old
+        # learned-current prediction.
+        cur_mean = getattr(data, 'current_mean', None)
+        cur_std = getattr(data, 'current_std', None)
+        if cur_mean is None:
+            cur_mean = torch.as_tensor(0.0, device=device, dtype=v_pred_norm.dtype)
+        else:
+            cur_mean = torch.as_tensor(cur_mean, device=device, dtype=v_pred_norm.dtype)
+        if cur_std is None:
+            cur_std = torch.as_tensor(1.0, device=device, dtype=v_pred_norm.dtype)
+        else:
+            cur_std = torch.as_tensor(cur_std, device=device, dtype=v_pred_norm.dtype).clamp(min=1e-6)
+
+        log10_eps = 1e-12
+        log_id = torch.log10(id_total.clamp_min(log10_eps))
+        z_id = (log_id - cur_mean) / cur_std
+
+        node_currents = torch.zeros(num_nodes, device=device, dtype=z_id.dtype)
+        # Drain + Source terminals both carry |id| of the device.
+        node_currents[drain_idx] = z_id
+        node_currents[source_idx] = z_id
+        result['node_currents'] = node_currents
+        # Also expose the raw MOSFET tensor for downstream tools that want it.
+        result['mosfet_id_lut'] = id_total
+
     def forward(self, data) -> Dict[str, torch.Tensor]:
-        # Get concatenated input features
+        # Mixed-topology batches (e.g., supervised pretrain via
+        # PretrainCombinedLoader) carry `topo_node_slices`. Pass through to
+        # _run_layers so VN MHA splits per-topo (uniform-size sub-batches).
+        # Standard single-topology batches set this to None — fast path.
+        self._topo_slices_for_mha = getattr(data, 'topo_node_slices', None)
+
+        # Base features (x, type_tens, ...). IV is NOT here — it's added only
+        # to the input projection below so the skip/head widths stay at the
+        # original node_feature_dim.
         x_in = self._get_input_features(data)
+
+        if self.use_iv_embedder and self.iv_embedder is not None:
+            iv_feat = self._compute_iv_features(
+                data, x_in.shape[0], x_in.dtype, x_in.device,
+            )
+            # Optionally drop W/L/wl_ratio/M (slots 0..3) for MOSFET
+            # terminal nodes so the IV embedding is the SOLE per-device
+            # signature for transistors. Non-MOSFET nodes are untouched.
+            if self._iv_replace_mosfet_props:
+                x_in = self._zero_mosfet_props(x_in, data)
+            x_proj_input = torch.cat([x_in, iv_feat], dim=-1)
+        else:
+            x_proj_input = x_in
+
+        if self.use_lut_op_features:
+            lut_feat = getattr(data, 'node_lut_features', None)
+            if lut_feat is None:
+                raise RuntimeError('lut_op_features enabled but batch has no '
+                                   '`node_lut_features` — re-patch the dataset '
+                                   'with scripts/patch_dataset_lut_op_features.py')
+            x_proj_input = torch.cat(
+                [x_proj_input, lut_feat.to(x_proj_input.dtype).to(x_proj_input.device)],
+                dim=-1,
+            )
+
+        if self.use_stack_features:
+            stack_feat = getattr(data, 'node_stack_features', None)
+            if stack_feat is None:
+                raise RuntimeError('stack_features enabled but batch has no '
+                                   '`node_stack_features` — re-patch the dataset '
+                                   'with scripts/patch_dataset_stack_features.py')
+            x_proj_input = torch.cat(
+                [x_proj_input, stack_feat.to(x_proj_input.dtype).to(x_proj_input.device)],
+                dim=-1,
+            )
+
+        if self.use_mosfet_descriptor:
+            desc_feat = self._compute_descriptor_features(
+                data, x_proj_input.shape[0], x_proj_input.dtype, x_proj_input.device,
+            )
+            x_proj_input = torch.cat([x_proj_input, desc_feat], dim=-1)
+
+        if self.use_mosfet_role:
+            role_feat = self._compute_role_features(
+                data, x_proj_input.shape[0], x_proj_input.dtype, x_proj_input.device,
+            )
+            x_proj_input = torch.cat([x_proj_input, role_feat], dim=-1)
+
+        if self.use_net_role:
+            net_role_feat = getattr(data, 'net_role', None)
+            if net_role_feat is None:
+                # Fall back to zeros if dataset wasn't patched
+                net_role_feat = torch.zeros(
+                    (x_proj_input.shape[0], self._net_role_dim),
+                    dtype=x_proj_input.dtype, device=x_proj_input.device,
+                )
+            else:
+                net_role_feat = net_role_feat.to(x_proj_input.dtype)
+            x_proj_input = torch.cat([x_proj_input, net_role_feat], dim=-1)
 
         # Input dropout
         if self.input_dropout > 0 and self.training:
-            x_in_proj = F.dropout(x_in, p=self.input_dropout, training=True)
-        else:
-            x_in_proj = x_in
+            x_proj_input = F.dropout(x_proj_input, p=self.input_dropout, training=True)
 
         # Input projection
-        x = self.input_linear(x_in_proj)
+        x = self.input_linear(x_proj_input)
 
         # Get batch info
         batch_vec = data.batch if hasattr(data, 'batch') else None
         num_graphs = self._get_num_graphs(data, batch_vec) if batch_vec is not None else 1
 
-        # Edge features
+        # Edge features. Two ways to subset the patched edge_attr:
+        #  - `edge_feature_indices` (list of int): pick specific dims (e.g. [0..5,10]
+        #    for base 6 + current_sign while skipping the 4 flag dims).
+        #  - else `edge_feature_dim`: take first N dims (contiguous).
         edge_attr = getattr(data, 'edge_attr', None) if self.use_edge_features else None
+        if edge_attr is not None:
+            if self._edge_feature_indices is not None:
+                edge_attr = edge_attr[:, self._edge_feature_indices]
+            elif edge_attr.shape[1] > self._edge_feature_dim:
+                edge_attr = edge_attr[:, :self._edge_feature_dim]
 
         # Initialize VN
         vn_emb = None
@@ -1866,6 +2438,21 @@ class TowerGENConv(BaseGNN):
             _loop_attn = self.loop_attn_layers
             _loop_ei = getattr(data, 'loop_edge_index', None)
             _loop_dtm = getattr(data, 'device_terminal_map', None)
+            # Validate pre-stored topology: device_terminal_map must be batched
+            # (max index ≥ first-graph node count) and loop_edge_index indices
+            # must fit in the device space (max < num_devices_total).
+            # Some datasets ship malformed pre-stored fields (e.g. node-level
+            # loop_edge_index with per-graph unbatched dtm) — fall back to
+            # _get_loop_data in that case to avoid index-clamping collisions
+            # in scatter_add (catastrophic slowdown via serialized atomics).
+            if _loop_ei is not None and _loop_dtm is not None:
+                first_graph_n = (data.ptr[1] - data.ptr[0]).item()
+                num_dev_total = _loop_dtm.shape[0]
+                dtm_batched = _loop_dtm.max().item() >= first_graph_n
+                ei_fits_devices = (_loop_ei.numel() == 0) or (_loop_ei.max().item() < num_dev_total)
+                if not (dtm_batched and ei_fits_devices):
+                    _loop_ei = None
+                    _loop_dtm = None
             # Compute on-the-fly if not precomputed (e.g., prebatched data)
             if _loop_ei is None or _loop_dtm is None:
                 _loop_ei, _loop_dtm, _node_loop_ei = self._get_loop_data(data)
@@ -2018,8 +2605,12 @@ class TowerGENConv(BaseGNN):
         _state_loop = _loop_attn if (self.use_loop_attention and getattr(self, 'loop_attn_apply_to', 'backbone') == 'all') else None
         _state_offset = getattr(self, '_loop_attn_backbone_count', 0)
         if self.state_tower_num_layers > 0:
+            _state_use_vn = (self.virtual_node is not None and self.vn_apply_to == 'all')
             state_outputs, _, _ = self._run_layers(
                 self.state_tower, tower_input, data.edge_index, edge_attr,
+                batch=batch_vec, num_graphs=num_graphs,
+                use_vn=_state_use_vn, vn_emb=vn_emb,
+                vn_layer_offset=self._vn_state_layer_offset,
                 loop_attn_layers=_state_loop,
                 loop_attn_offset=_state_offset,
                 device_terminal_map=_loop_dtm,
@@ -2034,6 +2625,13 @@ class TowerGENConv(BaseGNN):
             state_hidden = self.state_tower[0].act(self.state_tower[0].norm(state_hidden))
         else:
             state_hidden = tower_input
+
+        # Optional net-only self-attention before V head reads state_hidden
+        if self.use_net_attention:
+            num_terminals = getattr(data, 'num_terminals', None)
+            if num_terminals is not None:
+                state_hidden = self.net_attention(
+                    state_hidden, data.batch, num_terminals, data.ptr)
 
         # State repr with skip connection for prediction heads
         state_repr = torch.cat([state_hidden, x_in], dim=-1) if self.skip_connection else state_hidden
@@ -2063,7 +2661,13 @@ class TowerGENConv(BaseGNN):
             vgsvds_input = torch.cat([g_emb, d_emb, s_emb], dim=-1)
             result['vgsvds_pred'] = self.vgsvds_head(vgsvds_input)  # [M, 2]
 
-        if self.predict_currents:
+        # LUT-based current path: derive per-MOSFET id from predicted V via
+        # a differentiable interp over the SKY130 LUT, scatter |id| to the
+        # drain and source terminals. When enabled, this REPLACES the learned
+        # current head path entirely.
+        if self.use_lut_current and self.lut_id_query is not None:
+            self._lut_scatter_currents(data, result)
+        elif self.predict_currents:
             if self.use_device_pooling_current and self.device_current_head is not None:
                 # Compute voltage inputs for autograd SS if enabled
                 mosfet_voltages = None
@@ -2198,8 +2802,12 @@ class TowerGENConv(BaseGNN):
                 if self.sensitivity_tower_num_layers > 0:
                     _sens_loop = _loop_attn if (self.use_loop_attention and self.loop_attn_apply_to in ('all', 'sensitivity')) else None
                     _sens_offset = 0 if (self.use_loop_attention and self.loop_attn_apply_to == 'sensitivity') else getattr(self, '_loop_attn_backbone_count', 0) + getattr(self, '_loop_attn_state_count', 0)
+                    _sens_use_vn = (self.virtual_node is not None and self.vn_apply_to == 'all')
                     sens_outputs, _, _ = self._run_layers(
                         self.sensitivity_tower, sens_input, data.edge_index, edge_attr,
+                        batch=batch_vec, num_graphs=num_graphs,
+                        use_vn=_sens_use_vn, vn_emb=vn_emb,
+                        vn_layer_offset=self._vn_sens_layer_offset,
                         loop_attn_layers=_sens_loop,
                         loop_attn_offset=_sens_offset,
                         device_terminal_map=_loop_dtm,
@@ -2568,18 +3176,24 @@ class TowerGENConv(BaseGNN):
                 log_denom2 = log10_add(gds_key[:, 8], gds_key[:, 11])
                 log_A2 = log_A2_p1 + gm_key[:, 11] - log_denom2
 
-                # Stage 3: Rout3 = 1/(gds11+gds23), loaded with R_load
+                # Stage 3: Rout3 = 1/(gds11+gds23). For closed-loop the
+                # output is loaded by R_in+R_f; for open-loop the load is the
+                # output cap (open at DC) so we use the unloaded rout3 and
+                # drop the feedback-factor beta.
                 log_rout3 = -log10_add(gds_key[:, 12], gds_key[:, 13])
-                R_load = self._dc_r_in + self._dc_r_f
-                log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
-                log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
+                if getattr(self, '_dc_gain_openloop', False):
+                    log_rout3_loaded = log_rout3
+                    log_beta_term = 0.0   # no feedback factor
+                else:
+                    R_load = self._dc_r_in + self._dc_r_f
+                    log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
+                    log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
+                    beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                    log_beta_term = math.log10(float(beta))
 
-                # Feedback factor
-                beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
-
-                # T = A1 * Rout3_loaded * (gm11 + A2*gm23) * beta
+                # T = A1 * Rout3_loaded * (gm11 + A2*gm23) * (beta or 1)
                 log_sum_gm = log10_add(gm_key[:, 12], log_A2 + gm_key[:, 13])
-                log_T = log_A1 + log_rout3_loaded + log_sum_gm + math.log10(float(beta))
+                log_T = log_A1 + log_rout3_loaded + log_sum_gm + log_beta_term
                 dc_gain_est_dB = 20.0 * log_T  # [B], already in log10
 
                 # Assemble: 14 gm + 14 gds + 7 formula intermediates = 35 features (all log10)
@@ -2590,12 +3204,34 @@ class TowerGENConv(BaseGNN):
                 parts = [gm_key, gds_key, formula_feats]
                 # Optionally augment with voltage operating point context (Vgs, Vds)
                 if getattr(self, 'dc_gain_use_volt_ctx', False):
-                    v_pred = result['node_voltages'].detach()
+                    # Honor detach_ss flag — if False, gradients flow back into V head
+                    v_pred = result['node_voltages']
+                    if self.dc_gain_detach_ss:
+                        v_pred = v_pred.detach()
                     v_gate = v_pred[mosfet_info[:, 0] + offsets].view(B, M)[:, idx]
                     v_drain = v_pred[mosfet_info[:, 1] + offsets].view(B, M)[:, idx]
                     v_source = v_pred[mosfet_info[:, 2] + offsets].view(B, M)[:, idx]
                     parts.append(v_gate - v_source)  # Vgs [B, 14]
                     parts.append(v_drain - v_source)  # Vds [B, 14]
+                # Optionally augment with gm/Id ratio (operating efficiency).
+                # Both gm and current are already supervised — gm/Id is a tight
+                # constraint on bias regime that the gm/gds-only formula misses.
+                if getattr(self, 'dc_gain_use_gm_id_ctx', False):
+                    node_currents = result.get('node_currents')
+                    if node_currents is not None:
+                        if self.dc_gain_detach_ss:
+                            node_currents = node_currents.detach()
+                        # Take z-scored log10(|Id|) at drain terminal of each MOSFET
+                        drain_node_idx = mosfet_info[:, 1] + offsets
+                        z_id = node_currents[drain_node_idx]  # [M_total]
+                        # Denormalize to log10 domain
+                        log10_id = z_id * self.current_std_buf + self.current_mean_buf
+                        # gm_pred is z-scored too — use the already-denormalized
+                        # log10_gm computed above (in `log10_gm`, denormalized).
+                        log10_gm_per_mosfet = log10_gm  # [M_total], already denormalized
+                        log10_gm_id = log10_gm_per_mosfet - log10_id  # [M_total]
+                        gm_id_key = log10_gm_id.view(B, M)[:, idx]  # [B, 14]
+                        parts.append(gm_id_key)
                 # Optionally augment with VN context for global circuit info
                 if self.dc_gain_use_vn:
                     if len(backbone_mha_outputs) > 0:
@@ -2693,12 +3329,17 @@ class TowerGENConv(BaseGNN):
                 log_denom2 = log10_add(gds_key[:, 8], gds_key[:, 11])
                 log_A2 = log_A2_p1 + gm_key[:, 11] - log_denom2
                 log_rout3 = -log10_add(gds_key[:, 12], gds_key[:, 13])
-                R_load = self._dc_r_in + self._dc_r_f
-                log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
-                log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
-                beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                if getattr(self, '_dc_gain_openloop', False):
+                    log_rout3_loaded = log_rout3
+                    log_beta_term = 0.0
+                else:
+                    R_load = self._dc_r_in + self._dc_r_f
+                    log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
+                    log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
+                    beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                    log_beta_term = math.log10(float(beta))
                 log_sum_gm = log10_add(gm_key[:, 12], log_A2 + gm_key[:, 13])
-                log_T = log_A1 + log_rout3_loaded + log_sum_gm + math.log10(float(beta))
+                log_T = log_A1 + log_rout3_loaded + log_sum_gm + log_beta_term
                 dc_gain_est_dB = 20.0 * log_T
                 formula_feats = torch.stack([
                     log_rout1, log_A1, log_A2_p1, log_A2,
@@ -2758,12 +3399,17 @@ class TowerGENConv(BaseGNN):
                 log_denom2 = log10_add(gds_key[:, 8], gds_key[:, 11])
                 log_A2 = log_A2_p1 + gm_key[:, 11] - log_denom2
                 log_rout3 = -log10_add(gds_key[:, 12], gds_key[:, 13])
-                R_load = self._dc_r_in + self._dc_r_f
-                log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
-                log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
-                beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                if getattr(self, '_dc_gain_openloop', False):
+                    log_rout3_loaded = log_rout3
+                    log_beta_term = 0.0
+                else:
+                    R_load = self._dc_r_in + self._dc_r_f
+                    log_inv_rload = torch.tensor(-math.log10(float(R_load)), device=gm_key.device)
+                    log_rout3_loaded = -log10_add(-log_rout3, log_inv_rload)
+                    beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                    log_beta_term = math.log10(float(beta))
                 log_sum_gm = log10_add(gm_key[:, 12], log_A2 + gm_key[:, 13])
-                log_T = log_A1 + log_rout3_loaded + log_sum_gm + math.log10(float(beta))
+                log_T = log_A1 + log_rout3_loaded + log_sum_gm + log_beta_term
                 dc_gain_est_dB = 20.0 * log_T
                 formula_feats = torch.stack([
                     log_rout1, log_A1, log_A2_p1, log_A2,
@@ -2853,8 +3499,13 @@ class TowerGENConv(BaseGNN):
                 log10_Cc = Cc_norm * self._ac_cc_log10_range + self._ac_cc_log10_min
 
                 # Formula in log10 space (no pow(10) needed!)
-                beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
-                log10_ugbw_est = log10_gm_M8 + math.log10(float(beta) / (2 * math.pi)) - log10_Cc
+                # Openloop: β=1 (no feedback). Closed-loop: β = R_in/(R_in+R_f).
+                if getattr(self, '_ac_openloop', False):
+                    log10_beta_over_2pi = -math.log10(2 * math.pi)
+                else:
+                    beta = self._dc_r_in / (self._dc_r_in + self._dc_r_f + 1e-15)
+                    log10_beta_over_2pi = math.log10(float(beta) / (2 * math.pi))
+                log10_ugbw_est = log10_gm_M8 + log10_beta_over_2pi - log10_Cc
 
                 # Assemble: 14 z_gm + 14 z_gds + Cc_norm + log10_ugbw_est = 30
                 parts = [z_gm_key, z_gds_key, Cc_norm.unsqueeze(-1), log10_ugbw_est.unsqueeze(-1)]
@@ -2925,7 +3576,143 @@ class TowerGENConv(BaseGNN):
                 result['ac_pred'] = self.ac_head(ac_input)
             result['ac_components'] = self.ac_components
 
+        # End-to-end LUT-residual: like dc_gain physics, the LUT is a
+        # physics layer the heads predict CORRECTIONS to. Reconstructs the
+        # final id/gm/gds in z-scored log space as (LUT anchor + head output).
+        # Skipped during warmup so V has time to converge before its random
+        # initial values would wreck the LUT lookup → exploding gradients.
+        if self.use_lut_residual and self.current_epoch >= self._lut_residual_warmup_epochs:
+            if self.lut_residual_query is None:
+                # Lazy-load: only allocate the 28 GB LUT buffers when needed.
+                from ..components.lut_op_query import LUTOpQuery
+                print(f'[LUTResidual] warmup over — lazy-loading LUT from '
+                      f'{self._lut_residual_path!r} (epoch {self.current_epoch})')
+                self.lut_residual_query = LUTOpQuery(self._lut_residual_path)
+                # Move to the same device as the model
+                _dev = result['node_voltages'].device
+                self.lut_residual_query = self.lut_residual_query.to(_dev)
+            self._apply_lut_residual(data, result)
+
         return result
+
+    def _apply_lut_residual(self, data, result):
+        """Add LUT-anchored residual computation to result.
+
+        Reads V_pred from result['node_voltages'], computes per-MOSFET
+        (id, gm, gds) via LUT at that operating point, and reinterprets
+        the existing head outputs as residuals on top of the LUT anchor:
+            log_x_final = log_x_lut_z  +  head_output
+        Both are in batch-normalized z-score space, matching how the loss
+        consumes them.
+        """
+        v_pred_z = result.get('node_voltages')
+        if v_pred_z is None:
+            return
+        device = v_pred_z.device
+        mosfet_info = getattr(data, 'mosfet_info', None)
+        wl_um = getattr(data, 'mosfet_wl_um', None)
+        m_m = getattr(data, 'mosfet_m', None)
+        if mosfet_info is None or wl_um is None or m_m is None:
+            return
+        M = mosfet_info.shape[0]
+        if M == 0:
+            return
+
+        # Denormalize V to volts (batch-attached stats from data_loading)
+        vdc_mean = torch.as_tensor(getattr(data, 'voltage_mean', 0.0),
+                                    device=device, dtype=v_pred_z.dtype)
+        vdc_std = torch.as_tensor(getattr(data, 'voltage_std', 1.0),
+                                   device=device, dtype=v_pred_z.dtype).clamp(min=1e-6)
+        v_pred_for_lut = v_pred_z.detach() if self._lut_residual_detach_v else v_pred_z
+        v_volts = v_pred_for_lut * vdc_std + vdc_mean
+
+        # Map MOSFETs to graphs/offsets, then read V at NET nodes (where the
+        # baseline learns V well — terminals are unsupervised garbage).
+        from src.training.losses import get_device_graph_idx
+        ptr = data.ptr
+        mosfet_ptr = getattr(data, 'mosfet_ptr', None)
+        num_graphs = ptr.shape[0] - 1
+        g_idx = get_device_graph_idx(M, num_graphs, mosfet_ptr, device)
+        node_offsets = ptr[g_idx]
+
+        gate_net_g = mosfet_info[:, 3] + node_offsets
+        drain_net_g = mosfet_info[:, 4] + node_offsets
+        source_net_g = mosfet_info[:, 5] + node_offsets
+
+        v_gate = v_volts[gate_net_g]
+        v_drain = v_volts[drain_net_g]
+        v_source = v_volts[source_net_g]
+
+        # Bulk: GT V at the bulk terminal (topology-known supply at deploy
+        # time; using GT here equals netlist topology lookup).
+        v_gt_raw = data.node_voltage_targets.to(device)
+        term_idx = data.mosfet_terminal_idx.to(device)
+        bulk_t_g = term_idx[:, 3].clamp_min(0) + node_offsets
+        has_bulk = term_idx[:, 3] >= 0
+        v_bulk = torch.where(has_bulk, v_gt_raw[bulk_t_g], v_source)
+
+        Vgs = v_gate - v_source
+        Vds = v_drain - v_source
+        Vbs = v_bulk - v_source
+        is_nmos = mosfet_info[:, 6]
+
+        id_lin, gm_lut, gds_lut = self.lut_residual_query(
+            wl_um[:, 0], wl_um[:, 1], Vgs, Vds, Vbs, m_m, is_nmos,
+        )
+        log_id_lut = torch.log10(id_lin.clamp_min(1e-20))
+        log_gm_lut = torch.log10(gm_lut.abs().clamp_min(1e-20))
+        log_gds_lut = torch.log10(gds_lut.abs().clamp_min(1e-20))
+
+        # Z-score in the same space the heads / loss use.
+        cur_mean = torch.as_tensor(getattr(data, 'current_mean', 0.0),
+                                    device=device, dtype=v_pred_z.dtype)
+        cur_std = torch.as_tensor(getattr(data, 'current_std', 1.0),
+                                   device=device, dtype=v_pred_z.dtype).clamp(min=1e-6)
+
+        if hasattr(self, 'ss_gm_mean_buf') and hasattr(self, 'ss_gm_std_buf'):
+            gm_mean = self.ss_gm_mean_buf
+            gm_std = self.ss_gm_std_buf.clamp(min=1e-6)
+            gds_mean = self.ss_gds_mean_buf
+            gds_std = self.ss_gds_std_buf.clamp(min=1e-6)
+        else:
+            # Fallback: leave unscaled (heads should still learn)
+            gm_mean = torch.zeros((), device=device); gm_std = torch.ones((), device=device)
+            gds_mean = torch.zeros((), device=device); gds_std = torch.ones((), device=device)
+
+        z_id_lut = (log_id_lut - cur_mean) / cur_std
+        z_gm_lut = (log_gm_lut - gm_mean) / gm_std
+        z_gds_lut = (log_gds_lut - gds_mean) / gds_std
+
+        # Smooth ramp of the LUT anchor's contribution after warmup ends.
+        # Without this, the prediction = LUT + head jumps at exactly the
+        # warmup epoch — heads were trained as ABSOLUTE predictors, so
+        # adding a LUT anchor of similar magnitude doubles the prediction
+        # → instant huge MSE → gradient shock destabilizes the backbone.
+        # Linear ramp 0→1 over `ramp_epochs` lets heads gradually re-learn
+        # their outputs as deltas as the anchor grows.
+        if self._lut_residual_ramp_epochs > 0:
+            since_warmup = self.current_epoch - self._lut_residual_warmup_epochs
+            anchor_w = float(min(1.0, max(0.0, (since_warmup + 1) / self._lut_residual_ramp_epochs)))
+        else:
+            anchor_w = 1.0
+
+        # Treat existing head outputs as RESIDUALS, add (ramped) LUT anchor.
+        # gm/gds are per-MOSFET tensors of shape [M]; same for our LUT outputs.
+        if 'mosfet_gm_pred' in result:
+            result['mosfet_gm_pred'] = anchor_w * z_gm_lut + result['mosfet_gm_pred']
+        if 'mosfet_gds_pred' in result:
+            result['mosfet_gds_pred'] = anchor_w * z_gds_lut + result['mosfet_gds_pred']
+
+        # Currents are per-NODE [N] in z-score log10. Scatter id_lut to
+        # drain + source terminals just like _lut_scatter_currents does.
+        if 'node_currents' in result:
+            num_nodes = v_pred_z.shape[0]
+            drain_t_g = term_idx[:, 1] + node_offsets
+            source_t_g = term_idx[:, 2] + node_offsets
+            anchor = torch.zeros(num_nodes, device=device, dtype=v_pred_z.dtype)
+            anchor[drain_t_g] = z_id_lut
+            anchor[source_t_g] = z_id_lut
+            result['node_currents'] = anchor_w * anchor + result['node_currents']
 
     def _get_num_graphs(self, data, batch: torch.Tensor) -> int:
         if hasattr(data, 'num_graphs'):

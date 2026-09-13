@@ -45,6 +45,7 @@ class DevicePoolingCurrentHead(nn.Module):
     """Predict one current per device by pooling terminal embeddings.
 
     For MOSFETs: concat(drain, source[, Vgs, Vds, Vbs]) -> MLP -> 1 current
+    With all_terminals=True: concat(gate, drain, source, bulk[, ...]) -> MLP -> 1 current
     For 2-terminal devices (R, V, I): concat(p, n) -> MLP -> 1 current
     Capacitors get 0 current (DC analysis).
 
@@ -64,10 +65,12 @@ class DevicePoolingCurrentHead(nn.Module):
         dropout: float = 0.0,
         norm_type: str = 'layer',
         voltage_input: bool = False,
+        all_terminals: bool = False,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.voltage_input = voltage_input
+        self.all_terminals = all_terminals
 
         def _build_mlp(in_dim, use_silu=False):
             layers = []
@@ -81,8 +84,9 @@ class DevicePoolingCurrentHead(nn.Module):
             layers.append(nn.Linear(curr, 1))
             return nn.Sequential(*layers)
 
-        # MOSFET head: concat(drain_emb, source_emb[, Vgs, Vds, Vbs]) -> MLP -> 1
-        mosfet_in_dim = 2 * embed_dim + (3 if voltage_input else 0)
+        # MOSFET head: all_terminals uses G+D+S+B, default uses D+S only
+        n_mosfet_terms = 4 if all_terminals else 2
+        mosfet_in_dim = n_mosfet_terms * embed_dim + (3 if voltage_input else 0)
         self.mosfet_mlp = _build_mlp(mosfet_in_dim, use_silu=voltage_input)
 
         # 2-terminal head: concat(p_emb, n_emb) -> MLP -> 1
@@ -135,7 +139,7 @@ class DevicePoolingCurrentHead(nn.Module):
         device_mask = torch.zeros(num_nodes, device=x.device, dtype=torch.bool)
         mosfet_current = None
 
-        # MOSFETs: concat(drain, source[, voltages]) -> predict one current -> scatter to D,S
+        # MOSFETs: predict one current per device -> scatter to terminals
         if mosfet_info is not None and mosfet_info.numel() > 0:
             d_idx = mosfet_info[:, 1].long()
             s_idx = mosfet_info[:, 2].long()
@@ -143,7 +147,15 @@ class DevicePoolingCurrentHead(nn.Module):
                 offsets = _compute_batch_offsets(len(mosfet_info), mosfet_ptr, ptr, x.device)
                 d_idx = d_idx + offsets
                 s_idx = s_idx + offsets
-            parts = [x[d_idx], x[s_idx]]
+            if self.all_terminals:
+                g_idx = mosfet_info[:, 0].long()
+                b_idx = mosfet_info[:, 2].long() + 1  # bulk = source + 1
+                if is_batched:
+                    g_idx = g_idx + offsets
+                    b_idx = b_idx + offsets
+                parts = [x[g_idx], x[d_idx], x[s_idx], x[b_idx]]
+            else:
+                parts = [x[d_idx], x[s_idx]]
             if self.voltage_input and mosfet_voltages is not None:
                 parts.append(mosfet_voltages)
             device_emb = torch.cat(parts, dim=-1)
@@ -153,6 +165,9 @@ class DevicePoolingCurrentHead(nn.Module):
             device_current_cast = device_current.to(out.dtype)
             out[d_idx] = device_current_cast
             out[s_idx] = device_current_cast
+            if self.all_terminals:
+                out[g_idx] = device_current_cast
+                out[b_idx] = device_current_cast
             device_mask[d_idx] = True  # only drain for loss
 
         # 2-terminal devices: concat(p, n) -> predict -> scatter

@@ -53,6 +53,8 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Edge features
     args['use_edge_features'] = model_cfg.get('edge_features', False)
+    args['edge_feature_dim'] = model_cfg.get('edge_feature_dim', 6)
+    args['edge_feature_indices'] = model_cfg.get('edge_feature_indices', None)
     args['input_dropout'] = model_cfg.get('input_dropout', 0.0)
 
     # Virtual node - support both nested and flat formats
@@ -63,6 +65,7 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
     args['vn_mode'] = vn_cfg.get('mode', 'default')
     args['vn_num_heads'] = vn_cfg.get('num_heads', 4)
     args['vn_head_dim'] = vn_cfg.get('head_dim', 32)
+    args['vn_apply_to'] = vn_cfg.get('apply_to', 'backbone')   # 'backbone' or 'all'
     args['use_attention_pooling'] = vn_cfg.get('attention_pooling', model_cfg.get('use_attention_pooling', True))
 
     # JK - support both nested and flat formats
@@ -263,6 +266,75 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
         'detach': vgsvds_cfg.get('detach', True),
     }
 
+    # Pretrained IV-surface autoencoder as per-MOSFET input embedding
+    iv_cfg = model_cfg.get('iv_embedder', {})
+    args['iv_embedder_config'] = {
+        'enabled': iv_cfg.get('enabled', False),
+        'run_dir': iv_cfg.get('run_dir', ''),
+        'lut_path': iv_cfg.get('lut_path', None),
+        'freeze': iv_cfg.get('freeze', True),
+        'use_vbs': iv_cfg.get('use_vbs', False),
+        'replace_mosfet_props': iv_cfg.get('replace_mosfet_props', False),
+    }
+
+    # LUT-based MOSFET current derivation from predicted voltages
+    lut_cur_cfg = model_cfg.get('lut_current', {})
+    args['lut_current_config'] = {
+        'enabled': lut_cur_cfg.get('enabled', False),
+        'lut_path': lut_cur_cfg.get('lut_path',
+                                    'datasets/lut/lut_v2/sky130_mosfet_lut_v2_id_gm_gds.h5'),
+    }
+
+    # Iterative-refinement: precomputed per-node LUT op-point features
+    # (id, gm, gds at the pass-1-predicted bias). Dataset must be patched
+    # with scripts/patch_dataset_lut_op_features.py first.
+    lut_op_cfg = model_cfg.get('lut_op_features', {})
+    args['lut_op_features_config'] = {
+        'enabled': lut_op_cfg.get('enabled', False),
+    }
+
+    # Stacking variant: pass the frozen baseline's own predictions back as
+    # extra input features (V₀, I₀, gm₀, gds₀ per node). Dataset must be
+    # patched with scripts/patch_dataset_stack_features.py first.
+    stack_cfg = model_cfg.get('stack_features', {})
+    args['stack_features_config'] = {
+        'enabled': stack_cfg.get('enabled', False),
+    }
+
+    # 5-dim per-MOSFET physical descriptor from canonical-bias LUT lookups.
+    # Dataset must be patched with scripts/patch_dataset_mosfet_descriptor.py.
+    desc_cfg = model_cfg.get('mosfet_descriptor', {})
+    args['mosfet_descriptor_config'] = {
+        'enabled': desc_cfg.get('enabled', False),
+        'dim': desc_cfg.get('dim', 12),
+    }
+
+    # Per-MOSFET functional role one-hot (input pair, bias mirror, output...).
+    # Dataset must be patched with scripts/patch_dataset_mosfet_role.py.
+    role_cfg = model_cfg.get('mosfet_role', {})
+    args['mosfet_role_config'] = {
+        'enabled': role_cfg.get('enabled', False),
+        'dim': role_cfg.get('dim', 7),
+    }
+
+    # Per-net role one-hot (VDD/GND/SIG_IN/SIG_OUT/INTERNAL).
+    # Dataset must be patched with scripts/patch_dataset_net_role.py.
+    net_role_cfg = model_cfg.get('net_role', {})
+    args['net_role_config'] = {
+        'enabled': net_role_cfg.get('enabled', False),
+        'dim': net_role_cfg.get('dim', 5),
+    }
+
+    # End-to-end LUT-residual: heads predict deltas on top of LUT-anchored
+    # predictions. No patcher / baseline needed — model queries LUT internally.
+    lut_res_cfg = model_cfg.get('lut_residual', {})
+    args['lut_residual_config'] = {
+        'enabled': lut_res_cfg.get('enabled', False),
+        'lut_path': lut_res_cfg.get('lut_path',
+                                     'datasets/lut/lut_v2/sky130_mosfet_lut_v2_id_gm_gds.h5'),
+        'detach_v': lut_res_cfg.get('detach_v', True),
+    }
+
     # Refinement pass (two-pass architecture)
     refinement_cfg = heads_cfg.get('refinement', {})
     args['use_refinement_pass'] = refinement_cfg.get('enabled', model_cfg.get('use_refinement_pass', False))
@@ -366,6 +438,7 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
     args['gm_physics_loss_warmup_epochs'] = gm_phy_cfg.get('warmup_epochs', 0)
     args['gm_physics_min_vov'] = gm_phy_cfg.get('min_vov', 0.0)
     args['gm_physics_use_clm'] = gm_phy_cfg.get('use_clm', False)
+    args['gm_physics_use_smaxt'] = gm_phy_cfg.get('use_smaxt', False)
     args['gm_physics_use_gt_voltages'] = gm_phy_cfg.get('use_gt_voltages', True)
 
     # Triode physics regularizer loss (3 equations, training only)

@@ -68,7 +68,11 @@ def _sort_edge_index(batch):
         idx = torch.argsort(edge_index[1] * edge_index.max() + edge_index[0])
         batch.edge_index = edge_index[:, idx]
         if hasattr(batch, 'edge_attr') and batch.edge_attr is not None:
-            batch.edge_attr = batch.edge_attr[idx]
+            if batch.edge_attr.shape[0] == edge_index.shape[1]:
+                batch.edge_attr = batch.edge_attr[idx]
+            else:
+                # edge_attr doesn't match edge_index (e.g., inter-device edges added without attr)
+                batch.edge_attr = None
     return batch
 
 

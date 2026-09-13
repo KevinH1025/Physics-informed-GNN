@@ -136,6 +136,11 @@ class LoopAttention(nn.Module):
         # Sparse multi-head attention over loop edges
         src, dst = loop_edge_index
 
+        # Clamp indices to valid range (safety for variable batch sizes)
+        if src.max() >= D or dst.max() >= D:
+            src = src.clamp(max=D - 1)
+            dst = dst.clamp(max=D - 1)
+
         Q = self.W_q(device_emb).view(D, self.num_heads, self.head_dim)
         K = self.W_k(device_emb).view(D, self.num_heads, self.head_dim)
         V = self.W_v(device_emb).view(D, self.num_heads, self.head_dim)

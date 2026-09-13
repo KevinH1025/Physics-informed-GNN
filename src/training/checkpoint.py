@@ -38,6 +38,7 @@ def create_model(
     vn_mode='default',
     vn_num_heads=4,
     vn_head_dim=32,
+    vn_apply_to='backbone',
     gradient_checkpointing=False,
     device='cuda',
     model_type=None,
@@ -51,6 +52,8 @@ def create_model(
     device_aggregation_config=None,
     intermediate_voltage_config=None,
     use_edge_features=False,
+    edge_feature_dim=6,
+    edge_feature_indices=None,
     input_dropout=0.0,
     use_refinement_pass=False,
     refinement_config=None,
@@ -73,6 +76,14 @@ def create_model(
     gm_id_head_config=None,
     subcircuit_dag_config=None,
     vgsvds_config=None,
+    iv_embedder_config=None,
+    lut_current_config=None,
+    lut_op_features_config=None,
+    stack_features_config=None,
+    lut_residual_config=None,
+    mosfet_descriptor_config=None,
+    mosfet_role_config=None,
+    net_role_config=None,
 ):
     """
     Create a GNN model with the specified configuration.
@@ -145,6 +156,7 @@ def create_model(
         vn_mode=vn_mode,
         vn_num_heads=vn_num_heads,
         vn_head_dim=vn_head_dim,
+        vn_apply_to=vn_apply_to,
         gradient_checkpointing=gradient_checkpointing,
         # Voltage-derived current options
         derive_currents_from_voltage=derive_currents_from_voltage,
@@ -163,6 +175,8 @@ def create_model(
         intermediate_voltage_config=intermediate_voltage_config or {},
         # Edge features
         use_edge_features=use_edge_features,
+        edge_feature_dim=edge_feature_dim,
+        edge_feature_indices=edge_feature_indices,
         input_dropout=input_dropout,
         # Refinement pass options
         use_refinement_pass=use_refinement_pass,
@@ -197,6 +211,22 @@ def create_model(
         subcircuit_dag_config=subcircuit_dag_config or {},
         # Vgs/Vds prediction head
         vgsvds_config=vgsvds_config or {},
+        # Pretrained IV-surface autoencoder embedding as MOSFET input feature
+        iv_embedder_config=iv_embedder_config or {},
+        # Physics-exact currents from LUT lookup on predicted V
+        lut_current_config=lut_current_config or {},
+        # Iterative-refinement per-node LUT op-point features
+        lut_op_features_config=lut_op_features_config or {},
+        # Stacking: forward baseline predictions as extra inputs
+        stack_features_config=stack_features_config or {},
+        # End-to-end LUT-residual (heads predict deltas, LUT is physics layer)
+        lut_residual_config=lut_residual_config or {},
+        # 5-dim per-MOSFET physical descriptor (LUT lookups at canonical biases)
+        mosfet_descriptor_config=mosfet_descriptor_config or {},
+        # 7-dim per-MOSFET functional role one-hot
+        mosfet_role_config=mosfet_role_config or {},
+        # 5-dim per-net role one-hot (VDD/GND/SIG_IN/SIG_OUT/INTERNAL)
+        net_role_config=net_role_config or {},
     )
 
     # Create model using registry
@@ -250,6 +280,7 @@ def create_model_from_args(args, input_dim, device='cuda'):
         vn_mode=getattr(args, 'vn_mode', 'default'),
         vn_num_heads=getattr(args, 'vn_num_heads', 4),
         vn_head_dim=getattr(args, 'vn_head_dim', 32),
+        vn_apply_to=getattr(args, 'vn_apply_to', 'backbone'),
         gradient_checkpointing=getattr(args, 'gradient_checkpointing', False),
         device=device,
         model_type=model_type,
@@ -263,6 +294,8 @@ def create_model_from_args(args, input_dim, device='cuda'):
         device_aggregation_config=getattr(args, 'device_aggregation_config', {}),
         intermediate_voltage_config=getattr(args, 'intermediate_voltage_config', {}),
         use_edge_features=getattr(args, 'use_edge_features', False),
+        edge_feature_dim=getattr(args, 'edge_feature_dim', 6),
+        edge_feature_indices=getattr(args, 'edge_feature_indices', None),
         input_dropout=getattr(args, 'input_dropout', 0.0),
         use_refinement_pass=getattr(args, 'use_refinement_pass', False),
         refinement_config=getattr(args, 'refinement_config', {}),
@@ -284,6 +317,14 @@ def create_model_from_args(args, input_dim, device='cuda'):
         gm_id_head_config=getattr(args, 'gm_id_head_config', {}),
         subcircuit_dag_config=getattr(args, 'subcircuit_dag_config', {}),
         vgsvds_config=getattr(args, 'vgsvds_config', {}),
+        iv_embedder_config=getattr(args, 'iv_embedder_config', {}),
+        lut_current_config=getattr(args, 'lut_current_config', {}),
+        lut_op_features_config=getattr(args, 'lut_op_features_config', {}),
+        stack_features_config=getattr(args, 'stack_features_config', {}),
+        lut_residual_config=getattr(args, 'lut_residual_config', {}),
+        mosfet_descriptor_config=getattr(args, 'mosfet_descriptor_config', {}),
+        mosfet_role_config=getattr(args, 'mosfet_role_config', {}),
+        net_role_config=getattr(args, 'net_role_config', {}),
     )
 
 

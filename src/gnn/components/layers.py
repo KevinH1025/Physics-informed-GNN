@@ -11,13 +11,26 @@ import torch_geometric.nn as PyGnn
 
 
 class GINWithResidualMLP(nn.Module):
-    """GINConv with residual connection around the MLP."""
+    """GIN(E) with residual MLP. If edge_dim is given, uses GINEConv (edge-aware
+    aggregation: msg = x_j + edge_attr). Otherwise standard GINConv (edge-blind).
+    """
 
-    def __init__(self, hidden_dim, act_type, expansion=2, mlp_depth=2):
+    def __init__(self, hidden_dim, act_type, expansion=2, mlp_depth=2, edge_dim=None):
         super().__init__()
-        # GIN with identity MLP (just passes through)
-        self.conv = PyGnn.GINConv(nn.Identity(), train_eps=True)
-        # Separate MLP with residual
+        if edge_dim is not None:
+            # GINE: same as GIN but adds edge_attr to source features before sum.
+            # GINEConv needs to infer input channels from `nn`, so we can't use
+            # nn.Identity(). Use a Linear initialized to identity instead — the
+            # downstream MLP absorbs any drift; functionally equivalent to GIN
+            # at init.
+            _inner = nn.Linear(hidden_dim, hidden_dim, bias=False)
+            nn.init.eye_(_inner.weight)
+            self.conv = PyGnn.GINEConv(_inner, train_eps=True, edge_dim=edge_dim)
+            self.uses_edge = True
+        else:
+            self.conv = PyGnn.GINConv(nn.Identity(), train_eps=True)
+            self.uses_edge = False
+        # Separate MLP with residual (handled by enclosing DeepGCNLayer res+ block)
         if mlp_depth == 3:
             self.mlp = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim * expansion),
@@ -37,15 +50,23 @@ class GINWithResidualMLP(nn.Module):
             )
 
     def forward(self, x, edge_index, edge_attr=None):
-        h = self.conv(x, edge_index)  # sum + (1+eps)*self
+        if self.uses_edge and edge_attr is not None:
+            h = self.conv(x, edge_index, edge_attr)
+        else:
+            h = self.conv(x, edge_index)
         h = self.mlp(h)
         return h
 
 
 class GATv2WithFFN(nn.Module):
-    """GATv2Conv + FFN in one module, so FFN is inside the DeepGCNLayer residual."""
+    """GATv2Conv + FFN in one module, so FFN is inside the DeepGCNLayer residual.
 
-    def __init__(self, hidden_dim, num_heads, dropout, edge_dim, act_type, share_weights=False):
+    The post-conv FFN depth/expansion is configurable (mlp_depth=2 default,
+    mlp_depth=3 matches the GIN/GINE block shape used in the §4.2.1 ablation).
+    """
+
+    def __init__(self, hidden_dim, num_heads, dropout, edge_dim, act_type,
+                 share_weights=False, mlp_depth=2, expansion=2):
         super().__init__()
         head_dim = hidden_dim // num_heads
         self.conv = PyGnn.GATv2Conv(
@@ -57,12 +78,23 @@ class GATv2WithFFN(nn.Module):
             edge_dim=edge_dim,
             share_weights=share_weights,
         )
-        self.ffn = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.BatchNorm1d(hidden_dim * 2),
-            get_activation(act_type),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-        )
+        if mlp_depth == 3:
+            self.ffn = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * expansion),
+                nn.BatchNorm1d(hidden_dim * expansion),
+                get_activation(act_type),
+                nn.Linear(hidden_dim * expansion, hidden_dim * expansion),
+                nn.BatchNorm1d(hidden_dim * expansion),
+                get_activation(act_type),
+                nn.Linear(hidden_dim * expansion, hidden_dim),
+            )
+        else:
+            self.ffn = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * expansion),
+                nn.BatchNorm1d(hidden_dim * expansion),
+                get_activation(act_type),
+                nn.Linear(hidden_dim * expansion, hidden_dim),
+            )
 
     def forward(self, x, edge_index, edge_attr=None):
         h = self.conv(x, edge_index, edge_attr)
@@ -162,11 +194,16 @@ def create_deepgcn_layer(
     if conv_type == 'gin':
         expansion = kwargs.get('mlp_expansion', 2)
         mlp_depth = kwargs.get('mlp_depth', 2)
-        conv = GINWithResidualMLP(hidden_dim, act_type, expansion=expansion, mlp_depth=mlp_depth)
+        conv = GINWithResidualMLP(
+            hidden_dim, act_type, expansion=expansion, mlp_depth=mlp_depth,
+            edge_dim=edge_dim,  # if not None, becomes GINE
+        )
     elif conv_type == 'gatv2':
+        expansion = kwargs.get('mlp_expansion', 2)
+        mlp_depth = kwargs.get('mlp_depth', 2)
         conv = GATv2WithFFN(
             hidden_dim, num_heads, dropout, edge_dim,
-            act_type=act_type,
+            act_type=act_type, mlp_depth=mlp_depth, expansion=expansion,
         )
     else:
         conv_kwargs = dict(

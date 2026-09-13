@@ -234,6 +234,12 @@ class CircuitGraphBuilder:
         # Build terminal nodes
         terminals = []
         net_to_terminals = defaultdict(list)
+        # Raw (unnormalized) W, L per MOSFET device, in micrometers — needed
+        # downstream by IVEmbedder to query the SKY130 LUT at (W, L, Vbs=0).
+        # Raw M (multiplier) per MOSFET — scales LUT id linearly when we query
+        # the LUT for physics-derived currents.
+        device_raw_wl_um: Dict[str, Tuple[float, float]] = {}
+        device_raw_m: Dict[str, float] = {}
 
         for comp in components:
             type_map = {
@@ -253,6 +259,9 @@ class CircuitGraphBuilder:
                 l = params.get('l', 180e-9)
                 m = params.get('m', 1.0)
                 props = {'w': w, 'l': l, 'wl_ratio': w / l, 'm': m}
+                # Capture raw W, L (in meters → µm) + M before normalization
+                device_raw_wl_um[comp.name] = (w * 1e6, l * 1e6)
+                device_raw_m[comp.name] = float(m)
                 props = self._normalize_mosfet_props(comp.name, props)
                 term_names = ['drain', 'gate', 'source', 'bulk']
             elif dev_type == 'V':
@@ -393,6 +402,9 @@ class CircuitGraphBuilder:
 
         # Build MOSFET info
         mosfet_info, mosfet_device_names = self._create_mosfet_info(terminals, net_to_idx)
+        mosfet_terminal_idx, mosfet_wl_um, mosfet_m = self._create_mosfet_extras(
+            terminals, mosfet_device_names, device_raw_wl_um, device_raw_m,
+        )
         mosfet_region_labels = self._create_mosfet_region_labels(
             mosfet_device_names, mosfet_regions
         )
@@ -430,6 +442,9 @@ class CircuitGraphBuilder:
             terminal_current_sign=terminal_current_sign,
             kcl_include_mask=kcl_include_mask,
             mosfet_info=mosfet_info,
+            mosfet_terminal_idx=mosfet_terminal_idx,
+            mosfet_wl_um=mosfet_wl_um,
+            mosfet_m=mosfet_m,
             mosfet_region_labels=mosfet_region_labels,
             resistor_info=resistor_info,
             capacitor_info=capacitor_info,
@@ -673,6 +688,53 @@ class CircuitGraphBuilder:
             return torch.tensor(mosfet_info, dtype=torch.long), device_names
         else:
             return torch.zeros((0, 7), dtype=torch.long), []
+
+    def _create_mosfet_extras(
+        self,
+        terminals: List[TerminalNode],
+        mosfet_device_names: List[str],
+        device_raw_wl_um: Dict[str, Tuple[float, float]],
+        device_raw_m: Dict[str, float],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (mosfet_terminal_idx, mosfet_wl_um, mosfet_m).
+
+        mosfet_terminal_idx: [M, 4] long — [gate, drain, source, bulk] local terminal
+            indices. -1 when a given terminal is missing.
+        mosfet_wl_um: [M, 2] float — raw (W, L) in µm per MOSFET, for LUT query.
+        mosfet_m: [M] float — raw multiplier (fingers); scales LUT id linearly.
+        """
+        if not mosfet_device_names:
+            return (
+                torch.zeros((0, 4), dtype=torch.long),
+                torch.zeros((0, 2), dtype=torch.float),
+                torch.zeros((0,), dtype=torch.float),
+            )
+
+        dev_terms: Dict[str, Dict[str, int]] = defaultdict(dict)
+        for i, term in enumerate(terminals):
+            if term.device_type == 'M':
+                dev_terms[term.device_name][term.terminal_type] = i
+
+        term_rows = []
+        wl_rows = []
+        m_rows = []
+        for dev_name in mosfet_device_names:
+            tm = dev_terms.get(dev_name, {})
+            term_rows.append([
+                tm.get('gate', -1),
+                tm.get('drain', -1),
+                tm.get('source', -1),
+                tm.get('bulk', -1),
+            ])
+            w_um, l_um = device_raw_wl_um.get(dev_name, (0.0, 0.0))
+            wl_rows.append([w_um, l_um])
+            m_rows.append(device_raw_m.get(dev_name, 1.0))
+
+        return (
+            torch.tensor(term_rows, dtype=torch.long),
+            torch.tensor(wl_rows, dtype=torch.float),
+            torch.tensor(m_rows, dtype=torch.float),
+        )
 
     def _create_loop_info(
         self,

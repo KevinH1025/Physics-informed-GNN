@@ -51,32 +51,6 @@ class Component:
 
 
 @dataclass
-class Terminal:
-    """
-    Represents a device terminal (becomes a graph node).
-    
-    Each component has multiple terminals (e.g., MOSFET has 4: D, G, S, B).
-    Each terminal connects to exactly one net.
-    
-    Attributes:
-        name: Unique terminal name (e.g., 'M1_drain')
-        device_name: Parent component name (e.g., 'M1')
-        device_type: Component type ('mosfet', 'resistor', etc.)
-        terminal_type: Terminal role ('drain', 'gate', 'p', 'n', etc.)
-        net: Connected net name
-        device_params: Parameters from parent component
-        device_model: Model name from parent component
-    """
-    name: str
-    device_name: str
-    device_type: str
-    terminal_type: str
-    net: str
-    device_params: Dict[str, float]
-    device_model: Optional[str] = None
-
-
-@dataclass
 class NetNode:
     """
     Represents an electrical net in the circuit (becomes a graph node).

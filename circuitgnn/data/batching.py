@@ -8,7 +8,7 @@ shuffling variants for efficient GPU training without runtime batching overhead.
 import pickle
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 import numpy as np
@@ -112,28 +112,3 @@ def create_prebatched_dataset(
     print(f"    Metadata saved to {metadata_path.name}")
     if not is_validation:
         print(f"    Training will rotate through {actual_num_variants} variants each epoch")
-
-
-def load_prebatched_variant(split_dir: str, variant_id: int = 0) -> Tuple[List, Dict]:
-    """
-    Load a specific batching variant from a pre-batched dataset.
-
-    Args:
-        split_dir: Path to train/ or val/ directory
-        variant_id: Which variant to load (0 to num_variants-1)
-
-    Returns:
-        batches: List of pre-batched PyG Batch objects
-        metadata: Dict with batch_size, num_variants, etc.
-    """
-    split_dir = Path(split_dir)
-
-    metadata_path = split_dir / 'metadata.pkl'
-    with open(metadata_path, 'rb') as f:
-        metadata = pickle.load(f)
-
-    variant_path = split_dir / f'variant_{variant_id}.pkl'
-    with open(variant_path, 'rb') as f:
-        batches = pickle.load(f)
-
-    return batches, metadata

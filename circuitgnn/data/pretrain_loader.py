@@ -27,6 +27,8 @@ from typing import Dict, List, Optional
 
 import torch
 
+from circuitgnn.data import net_roles
+
 
 # Per-sample varying tensors actually needed by the backbone forward path.
 # Everything else is per-topology fixed and pre-batched into the template.
@@ -313,23 +315,19 @@ class PretrainCombinedLoader:
         return out[out >= 0]
 
     # Net role classification: 5 classes (VDD/GND/SIG_IN/SIG_OUT/INTERNAL).
-    # Same logic as scripts/patch_dataset_net_role.py — kept inline so the
-    # combined corpus doesn't need a separate patch step.
-    _NET_ROLE_DIM = 5
-    _ROLE_VDD, _ROLE_GND, _ROLE_SIG_IN, _ROLE_SIG_OUT, _ROLE_INTERNAL = 0, 1, 2, 3, 4
+    # Same logic as scripts/patch_dataset_net_role.py — shared core lives in
+    # circuitgnn.data.net_roles so the combined corpus doesn't need a
+    # separate patch step.
+    _NET_ROLE_DIM = net_roles.NET_ROLE_DIM
+    _ROLE_VDD = net_roles.ROLE_VDD
+    _ROLE_GND = net_roles.ROLE_GND
+    _ROLE_SIG_IN = net_roles.ROLE_SIG_IN
+    _ROLE_SIG_OUT = net_roles.ROLE_SIG_OUT
+    _ROLE_INTERNAL = net_roles.ROLE_INTERNAL
 
     @classmethod
     def _classify_net(cls, name: str) -> int:
-        n = name.lower()
-        if n in ('0', 'gnd', 'vss') or 'gnda' in n or n.startswith('gnd'):
-            return cls._ROLE_GND
-        if 'vdd' in n or 'vcc' in n:
-            return cls._ROLE_VDD
-        if 'vin' in n or n in ('vp', 'vn', 'vsig', 'inp', 'inn'):
-            return cls._ROLE_SIG_IN
-        if 'vout' in n:
-            return cls._ROLE_SIG_OUT
-        return cls._ROLE_INTERNAL
+        return net_roles.classify_net_role(name)
 
     def _compute_net_role_for_graph(self, g0) -> torch.Tensor:
         """Build [n_nodes, 5] net_role one-hot for one graph. Net nodes get a

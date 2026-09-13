@@ -6,7 +6,9 @@ This module provides utilities for:
 - Parameter sampling (LHS)
 - Pre-batching for efficient training
 - Visualization and plotting
-- Feature normalization
+
+The plotting functions (and their matplotlib dependency) are loaded lazily
+so headless consumers don't pay the matplotlib import cost.
 """
 
 from circuitgnn.data.encoding import Trie, build_circuit_trie
@@ -16,14 +18,7 @@ from circuitgnn.data.sampling import (
     generate_netlist,
     worker_generate_sample,
 )
-from circuitgnn.data.batching import create_prebatched_dataset, load_prebatched_variant
-from circuitgnn.data.plotting import (
-    plot_parameter_distributions,
-    plot_node_voltage_distributions,
-    plot_device_current_distributions,
-    plot_target_normalization_distributions,
-)
-from circuitgnn.data.normalization import compute_normalization_stats, normalize_features
+from circuitgnn.data.batching import create_prebatched_dataset
 
 __all__ = [
     # Encoding
@@ -39,13 +34,23 @@ __all__ = [
     'worker_generate_sample',
     # Batching
     'create_prebatched_dataset',
-    'load_prebatched_variant',
     # Plotting
     'plot_parameter_distributions',
     'plot_node_voltage_distributions',
     'plot_device_current_distributions',
     'plot_target_normalization_distributions',
-    # Normalization
-    'compute_normalization_stats',
-    'normalize_features',
 ]
+
+_PLOTTING_EXPORTS = (
+    'plot_parameter_distributions',
+    'plot_node_voltage_distributions',
+    'plot_device_current_distributions',
+    'plot_target_normalization_distributions',
+)
+
+
+def __getattr__(name):
+    if name in _PLOTTING_EXPORTS:
+        from circuitgnn.data import plotting
+        return getattr(plotting, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

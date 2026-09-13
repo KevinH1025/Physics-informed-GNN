@@ -10,12 +10,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-import networkx as nx
 import numpy as np
 import torch
 from torch_geometric.data import Data
 
 from circuitgnn.data.encoding import build_circuit_trie
+from circuitgnn.data.loop_info import build_loop_info
+from circuitgnn.data.net_roles import classify_net
 from circuitgnn.circuits.parser import SPICENetlistParser
 
 
@@ -203,16 +204,7 @@ class CircuitGraphBuilder:
         Templates should use consistent names: vdd/vdda for supply, gnd/gnda/0 for ground,
         vin*/vp/vn for inputs, vout* for outputs. Everything else is internal.
         """
-        net_lower = net_name.lower()
-        if net_lower in ('0', 'gnd', 'vss') or 'gnda' in net_lower:
-            return 'gnd'
-        if 'vdd' in net_lower or 'vcc' in net_lower:
-            return 'vdd'
-        if 'vin' in net_lower or net_lower in ('vp', 'vn', 'vsig', 'inp', 'inn'):
-            return 'input'
-        if 'vout' in net_lower:
-            return 'output'
-        return 'internal'
+        return classify_net(net_name)
 
     def build_from_netlist(self, netlist_path: str, sim_results: Dict,
                            vdd: float = 1.8, vcm: float = 0.9,
@@ -759,55 +751,11 @@ class CircuitGraphBuilder:
             device_nets[dev].add(term.net)
 
         device_names = list(device_terms.keys())
-        dev_to_idx = {name: i for i, name in enumerate(device_names)}
-        num_devices = len(device_names)
 
-        # Build device-level graph: edge if two devices share a net
-        G = nx.Graph()
-        G.add_nodes_from(range(num_devices))
-
-        # net → list of device indices
-        net_to_devices = defaultdict(set)
-        for dev_name, nets in device_nets.items():
-            for net in nets:
-                net_to_devices[net].add(dev_to_idx[dev_name])
-
-        for net, devs in net_to_devices.items():
-            devs = list(devs)
-            for i in range(len(devs)):
-                for j in range(i + 1, len(devs)):
-                    G.add_edge(devs[i], devs[j])
-
-        # Find fundamental cycles
-        cycles = nx.cycle_basis(G)
-
-        # Build loop_edge_index: connect all device pairs within each cycle
-        loop_edges = set()
-        for cycle in cycles:
-            for i in range(len(cycle)):
-                for j in range(i + 1, len(cycle)):
-                    a, b = min(cycle[i], cycle[j]), max(cycle[i], cycle[j])
-                    loop_edges.add((a, b))
-
-        # Make bidirectional
-        if loop_edges:
-            src, dst = [], []
-            for a, b in loop_edges:
-                src.extend([a, b])
-                dst.extend([b, a])
-            loop_edge_index = torch.tensor([src, dst], dtype=torch.long)
-        else:
-            loop_edge_index = torch.zeros((2, 0), dtype=torch.long)
-
-        # Build device_terminal_map: [D, 4] padded with -1
-        max_terms = 4
-        device_terminal_map = torch.full((num_devices, max_terms), -1, dtype=torch.long)
-        for dev_name, term_indices in device_terms.items():
-            d = dev_to_idx[dev_name]
-            for t, idx in enumerate(term_indices[:max_terms]):
-                device_terminal_map[d, t] = idx
-
-        return loop_edge_index, device_terminal_map
+        return build_loop_info(
+            [device_terms[name] for name in device_names],
+            [device_nets[name] for name in device_names],
+        )
 
     def _create_mosfet_region_labels(
         self,

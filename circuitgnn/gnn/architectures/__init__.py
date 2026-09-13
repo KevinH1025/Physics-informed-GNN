@@ -10,7 +10,7 @@ Use `use_virtual_node=True` to enable it.
 
 from .base import BaseGNN
 from .deepgen import DeepGENConv
-from .tower_genconv import TowerGENConv
+from .tower import TowerGENConv
 
 __all__ = [
     'BaseGNN',

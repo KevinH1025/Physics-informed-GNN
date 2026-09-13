@@ -16,13 +16,13 @@ Memory footprint for 16k samples (3-stage opamp):
 
 import pickle
 import random
-from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
-import networkx as nx
 import torch
+
+from circuitgnn.data.loop_info import build_loop_info
 
 
 class FixedTopologyDataset:
@@ -260,48 +260,7 @@ class FixedTopologyDataset:
         if num_devices == 0:
             return None, None
 
-        # Build device-level graph: edge if two devices share a net
-        net_to_devs = defaultdict(set)
-        for d, nets in enumerate(device_nets):
-            for net in nets:
-                net_to_devs[net].add(d)
-
-        G = nx.Graph()
-        G.add_nodes_from(range(num_devices))
-        for net, devs in net_to_devs.items():
-            devs = list(devs)
-            for i in range(len(devs)):
-                for j in range(i + 1, len(devs)):
-                    G.add_edge(devs[i], devs[j])
-
-        # Find fundamental cycles
-        cycles = nx.cycle_basis(G)
-
-        # Build loop_edge_index: all pairs within each cycle, bidirectional
-        loop_edges = set()
-        for cycle in cycles:
-            for i in range(len(cycle)):
-                for j in range(i + 1, len(cycle)):
-                    a, b = min(cycle[i], cycle[j]), max(cycle[i], cycle[j])
-                    loop_edges.add((a, b))
-
-        if loop_edges:
-            src, dst = [], []
-            for a, b in loop_edges:
-                src.extend([a, b])
-                dst.extend([b, a])
-            loop_edge_index = torch.tensor([src, dst], dtype=torch.long)
-        else:
-            loop_edge_index = torch.zeros((2, 0), dtype=torch.long)
-
-        # Build device_terminal_map: [D, 4] padded with -1
-        max_terms = 4
-        device_terminal_map = torch.full((num_devices, max_terms), -1, dtype=torch.long)
-        for d, terms in enumerate(device_terms):
-            for t, idx in enumerate(terms[:max_terms]):
-                device_terminal_map[d, t] = idx
-
-        return loop_edge_index, device_terminal_map
+        return build_loop_info(device_terms, device_nets)
 
     # ── Batch template (precomputed fixed parts for a given B) ───────────
 

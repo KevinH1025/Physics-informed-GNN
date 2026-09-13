@@ -5,7 +5,8 @@ This package provides GNN architectures for predicting DC operating point
 voltages and currents in analog circuits from graph representations.
 
 Subpackages:
-    - architectures: GNN model implementations (DeepGENConv, etc.)
+    - architectures: GNN model implementations (TowerGENConv in the
+      architectures.tower package, DeepGENConv, etc.)
     - components: Reusable building blocks (layers, aggregation, virtual_node)
 
 Registry:
@@ -14,6 +15,7 @@ Registry:
     - list_models: List all registered model names
 
 Models:
+    - TowerGENConv: shared backbone + state/sensitivity towers (primary)
     - DeepGENConv: Deep GNN with GENConv layers (supports optional Virtual Node)
 
 Virtual Node:

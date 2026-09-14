@@ -247,7 +247,15 @@ A two-stage Miller-compensated amplifier is also included, used during early dev
 
 The five are alike at the device level yet differ sharply at the circuit level: mean DC gain ranges from -77 dB to +33 dB and the fraction of sampled circuits that amplify at all ranges from 8% to 77%.
 
-One model trained on all five covers every topology at close to the accuracy of a dedicated per-topology model, from a fifth of the per-topology data. A topology held out entirely does not work zero-shot, but fine-tuning a pretrained model beats training from scratch at every data size.
+![Target distributions across topologies](docs/images/topology_distributions.png)
+
+*(a) The per-device current is distributed almost identically across the five topologies. (b) The DC gain is where they split, with most topologies sitting well below the amplifying threshold.*
+
+One model trained on all five covers every topology at close to the accuracy of a dedicated per-topology model, from a fifth of the per-topology data. A topology held out entirely does not work zero-shot, but a model pretrained on the other four and fine-tuned on the new one beats training from scratch at every data size. The gap is widest when data is scarce.
+
+![Fine-tuning against training from scratch](docs/images/finetune_vs_scratch.png)
+
+*Voltage error on each held-out topology after fine-tuning a model pretrained on the other four (green) against training from scratch (red), at each fine-tuning sample size N.*
 
 ## Configuration
 

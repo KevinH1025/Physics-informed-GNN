@@ -175,7 +175,7 @@ def main():
         if not split_dir.exists():
             print(f"\nTest split not found at {split_dir}, falling back to val")
             split = 'val'
-        elif not list(split_dir.glob('*.pt')):
+        elif not list(split_dir.glob('variant_*.pkl')):
             print(f"\nTest split is empty at {split_dir}, falling back to val")
             split = 'val'
 

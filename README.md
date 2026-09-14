@@ -60,7 +60,7 @@ The soft KCL loss is the weaker form of the same idea, used where the hard form 
 
 ## How the model works
 
-Circuits become **bipartite graphs**. Every device terminal and every net is a node. Edges connect each terminal to its net, with additional edges tying the terminals of one device together, and each edge records which terminal it belongs to. Topology is given to the network rather than inferred.
+Circuits become **bipartite graphs**. Every device terminal and every net is a node. Edges connect each terminal to its net, with additional edges tying the terminals of one device together. Each edge records which terminal it belongs to. Topology is given to the network rather than inferred.
 
 ```mermaid
 flowchart TB

@@ -35,16 +35,17 @@ Why bipartite rather than one node per device: currents are a per-terminal quant
 
 ## Model
 
-`TowerGENConv` (`circuitgnn/gnn/architectures/tower/`) is the current architecture. A shared message-passing backbone feeds two specialized towers:
+`TowerGENConv` (`circuitgnn/gnn/architectures/tower/`) implements the architecture. The class name is historical: the reported model runs with **both towers disabled**, because the ablation found a single shared backbone beats splitting the last layers into per-output towers. The tower depths stay configurable so that ablation is still reproducible.
 
-- **State tower** predicts quantities that describe the operating point: node voltages and terminal currents.
-- **Sensitivity tower** predicts small-signal quantities: gm and gds per MOSFET, which then feed the analytic gain formula.
+The reference configuration is a shared backbone of eight layers at hidden width 128. Each layer applies three gated additive updates in sequence: global self-attention for circuit-wide context, GINE message passing over the device-net edges and loop attention over the circuit's fundamental cycles. Outputs of all eight layers are merged by attention-weighted jumping knowledge and concatenated with a skip connection carrying the raw device and type features.
 
-Around the backbone sit a virtual node for global context, optional loop attention over circuit cycles found by cycle-basis decomposition and jumping-knowledge aggregation across layers. Every one of these is a config switch, because the thesis ablations turn them on and off individually.
+Four heads read that representation: a linear voltage head, a device-pooled current head, a small-signal head that gathers a transistor's four terminals plus operating-point context and a DC-gain head that refines an analytical estimate.
+
+Loop attention is the component that matters most. Removing it more than doubles the voltage error, more than any other single ablation.
 
 The class is large and stays whole on purpose. Its `state_dict` key names are the interface to every checkpoint saved during the study, so splitting it into subclasses would rename keys and orphan the saved models. Internally it is decomposed: `__init__` calls focused `_build_*` methods and `forward` calls `_forward_*` stage methods, in a fixed order.
 
-The single file it is worth knowing about is `tower/physics.py`. The three-stage DC gain formula and the Miller UGBW estimate live there as pure functions in log10 space. These formulas are the physics contribution, so they get one tested home rather than the three copy-pasted inlined versions they had before.
+The file worth knowing about is `tower/physics.py`. The three-stage DC gain formula lives there as a pure function in log10 space, single-sourced rather than the three copy-pasted inline versions it had before. The Miller UGBW estimate sits beside it, used only by the bandwidth experiments that the thesis reports as unsuccessful.
 
 ## Losses
 
@@ -58,7 +59,9 @@ The single file it is worth knowing about is `tower/physics.py`. The three-stage
 | `supervised_heads.py` | gm/gds, AC, DC gain, Vov, Vth and related heads |
 | `aggregate.py` | `compute_combined_loss`, which weights and sums everything |
 
-Physics terms are typically warmup-scheduled: they switch on after the data terms have found a reasonable operating point, because a physics residual computed on noise is not informative. Weights, start epochs and warmup lengths are all config-driven.
+**Only the KCL term is active in the reported model.** The device-physics module is kept because the thesis needs it: its central experiment is showing that every approximate device relation degrades accuracy against a BSIM4 ground truth. Those losses exist to be switched on for that ablation, not to be used. If you are building on this, leave them at weight zero unless you are reproducing that study.
+
+KCL is warmup-scheduled: it stays at zero until epoch 200 and then ramps in over 100 epochs, because a current-conservation residual computed on untrained current predictions is noise. Weights, start epochs and warmup lengths are all config-driven.
 
 ## Configuration
 

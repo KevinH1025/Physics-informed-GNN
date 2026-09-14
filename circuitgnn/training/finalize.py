@@ -4,11 +4,10 @@ The printed summary is a frozen surface (the figure scripts regex-parse
 'Best Val MAE: ...' and the accuracy tables out of training.log), so nothing
 here may be reworded, respaced or rounded differently.
 
-NOTE: the best-checkpoint aliasing bug is deliberately preserved. train_v3
-snapshots ``best_model_state = model.state_dict()`` without a deep copy, so the
-tensors alias live parameters and the checkpoint written here holds final-epoch
-weights. Fixing that is a separate, behavior-changing commit; this module just
-writes whatever state dict it is handed.
+This module writes whatever state dict it is handed. train_v3 snapshots the
+best epoch's weights as a detached CPU clone, which it must: a bare
+``model.state_dict()`` aliases the live parameters and would follow training
+to the final epoch.
 """
 
 import time

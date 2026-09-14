@@ -783,7 +783,11 @@ def main():
             if improved:
                 best_composite_score = max(best_composite_score, composite_score)
                 best_val_loss, best_epoch = val_loss_sched, epoch
-                best_model_state = model.state_dict()
+                # Detached CPU clone: a bare state_dict() aliases the live
+                # parameters, so the "best" snapshot would follow training and
+                # end up holding final-epoch weights.
+                best_model_state = {k: v.detach().cpu().clone()
+                                    for k, v in model.state_dict().items()}
                 epochs_without_improvement = 0
                 best_metrics.update(val_mae_mv=val_mae_mv, val_current_mae_ua=val_c_mae, acc80=acc80, acc50=acc50, acc20=acc20, acc10=acc10,
                                      current_acc50=current_acc50, current_acc20=current_acc20, current_acc10=current_acc10, current_acc5=current_acc5,

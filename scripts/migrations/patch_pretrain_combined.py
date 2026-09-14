@@ -152,7 +152,7 @@ def patch_split(input_path: Path, mappings: dict) -> None:
 
 
 def main():
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     netlists_dir = repo / 'netlists'
     print(f'Parsing netlist templates from {netlists_dir}...')
     mappings = build_topology_mappings(netlists_dir)

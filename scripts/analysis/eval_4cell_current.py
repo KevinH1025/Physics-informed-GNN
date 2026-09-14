@@ -47,7 +47,7 @@ def main():
         f = out[cell].get('fan_smc'); s = out[cell].get('sau_cfcc')
         def fmt(m, k): return f'{m[k]:.2f}' if (m and m.get(k) is not None) else 'NA'
         print(f"{cell:<22} | {fmt(f,'v_mae_mV'):>12} | {fmt(s,'v_mae_mV'):>12}")
-    json.dump(out, open(Path(__file__).resolve().parents[1] / 'figures/thesis/cell_4_current.json', 'w'), indent=2)
+    json.dump(out, open(Path(__file__).resolve().parents[2] / 'figures/thesis/cell_4_current.json', 'w'), indent=2)
 
 if __name__ == '__main__':
     main()

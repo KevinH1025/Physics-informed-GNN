@@ -6,6 +6,7 @@ space exploration and netlist generation from templates.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -93,10 +94,28 @@ def generate_random_params(param_specs: Dict) -> Dict:
     return params
 
 
+PDK_ROOT_ENV = 'SKY130_PDK_ROOT'
+
+
+def _pdk_root() -> str:
+    """Root of the local SKY130 install, from the environment."""
+    root = os.environ.get(PDK_ROOT_ENV)
+    if not root:
+        raise RuntimeError(
+            f'The netlist templates include SKY130 device models via the '
+            f'{{PDK_ROOT}} placeholder. Point {PDK_ROOT_ENV} at your install, '
+            f'for example: export {PDK_ROOT_ENV}=/path/to/sky130'
+        )
+    return root.rstrip('/')
+
+
 def generate_netlist(template_path: str, params: Dict, output_path: str) -> str:
     """Generate netlist from template with given parameters."""
     with open(template_path, 'r') as f:
         template = f.read()
+
+    if '{PDK_ROOT}' in template and 'PDK_ROOT' not in params:
+        params = {**params, 'PDK_ROOT': _pdk_root()}
 
     netlist = template
     for name, value in params.items():

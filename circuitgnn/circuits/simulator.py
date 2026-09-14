@@ -32,7 +32,9 @@ from contextlib import contextmanager
 
 # Suppress verbose NgSpice logging
 logging.getLogger('PySpice.Spice.NgSpice.Shared').setLevel(logging.ERROR)
-os.environ['PYSPICE_LIBRARY_PATH'] = '/usr/local/lib'
+# Where PySpice looks for libngspice. Override by exporting
+# PYSPICE_LIBRARY_PATH before import if ngspice lives elsewhere.
+os.environ.setdefault('PYSPICE_LIBRARY_PATH', '/usr/local/lib')
 
 from PySpice.Spice.NgSpice.Shared import NgSpiceShared
 

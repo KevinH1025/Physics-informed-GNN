@@ -71,7 +71,15 @@ cd <repo>
 pip install -e .
 ```
 
-Python 3.10 or newer with PyTorch 2.5 and PyTorch Geometric 2.7 (see requirements.txt for the exact versions the experiments ran with). Dataset generation additionally needs a system ngspice installation, PySpice and the SKY130 PDK model files.
+Python 3.10 or newer with PyTorch 2.5 and PyTorch Geometric 2.7 (see requirements.txt for the exact versions the experiments ran with).
+
+Training and evaluation need nothing further. Dataset generation additionally needs a system ngspice install, PySpice (`pip install -e ".[spice]"`) and the SKY130 PDK, whose location you point at with an environment variable:
+
+```bash
+export SKY130_PDK_ROOT=/path/to/sky130
+```
+
+The netlist templates reference the device models through that variable. If PySpice cannot find `libngspice`, set `PYSPICE_LIBRARY_PATH` to the directory containing it.
 
 ## Quickstart
 

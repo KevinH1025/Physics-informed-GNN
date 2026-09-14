@@ -48,8 +48,8 @@
 .param sky130_fd_pr__pfet_01v8__wku0_diff=0
 .param sky130_fd_pr__pfet_01v8__kvsat_diff=0
 
-.include "/home/kevin/tech/sky130/libraries/sky130_fd_pr/latest/cells/pfet_01v8/sky130_fd_pr__pfet_01v8__tt.corner.spice"
-.include "/home/kevin/tech/sky130/libraries/sky130_fd_pr/latest/cells/nfet_01v8/sky130_fd_pr__nfet_01v8__tt.corner.spice"
+.include "{PDK_ROOT}/libraries/sky130_fd_pr/latest/cells/pfet_01v8/sky130_fd_pr__pfet_01v8__tt.corner.spice"
+.include "{PDK_ROOT}/libraries/sky130_fd_pr/latest/cells/nfet_01v8/sky130_fd_pr__nfet_01v8__tt.corner.spice"
 
 * Power supplies (parametric for dataset generation)
 Vdd vdd 0 DC {VDD}

@@ -372,7 +372,7 @@ def print_detail_report(model, train_loader, val_loader, args, epoch, lr,
     val_hc_mirror_loss = metrics['val_hc_mirror_loss']
     val_mirror_pair_detail = metrics['val_mirror_pair_detail']
 
-    tr_loss, tr_mae_mv, tr_v_loss, tr_c_loss, tr_c_mae, tr_acc80, tr_acc50, tr_acc20, tr_acc10, tr_current_acc50, tr_current_acc20, tr_current_acc10, tr_current_acc5, tr_kcl_loss, tr_dp_loss, tr_mirror_loss, tr_os_loss, tr_lm_loss, tr_gm_physics_loss, tr_ac_loss, tr_ss_gm_loss, tr_ss_gds_loss, tr_triode_physics_loss, tr_triode_eq1, tr_triode_eq2, tr_triode_eq3, tr_cutoff_physics_loss, tr_region_loss, _tr_rel_metrics, _tr_vov_loss, _tr_vth_loss, tr_ac_comp_detail, tr_dc_gain_loss, _tr_gm_id_loss, _tr_gm_id_aux_loss, tr_hc_mirror, tr_mirror_pair_detail = validate(
+    tr_metrics = validate(
         model, train_loader, args.device, vdc_mean, vdc_std, current_mean, current_std,
         predict_currents=predict_currents, current_weight=current_weight,
         voltage_weight=getattr(args, 'voltage_weight', 1.0),
@@ -407,6 +407,41 @@ def print_detail_report(model, train_loader, val_loader, args, epoch, lr,
         mirror_pair_names=mirror_pair_names,
         ac_pred_filter=getattr(args, 'ac_pred_filter', False),
     )
+    # Bind the ValMetrics fields the table shows. Assignment is by field name,
+    # so adding or reordering a metric in loops.py cannot silently shift the
+    # train column of this table one slot along.
+    tr_loss = tr_metrics.avg_loss
+    tr_mae_mv = tr_metrics.mae_mv
+    tr_v_loss = tr_metrics.avg_voltage_loss
+    tr_c_loss = tr_metrics.avg_current_loss
+    tr_c_mae = tr_metrics.current_mae_ua
+    tr_acc80 = tr_metrics.acc80
+    tr_acc50 = tr_metrics.acc50
+    tr_acc20 = tr_metrics.acc20
+    tr_acc10 = tr_metrics.acc10
+    tr_current_acc50 = tr_metrics.current_acc50
+    tr_current_acc20 = tr_metrics.current_acc20
+    tr_current_acc10 = tr_metrics.current_acc10
+    tr_current_acc5 = tr_metrics.current_acc5
+    tr_kcl_loss = tr_metrics.avg_kcl_loss
+    tr_dp_loss = tr_metrics.avg_diff_pair_loss
+    tr_mirror_loss = tr_metrics.avg_mirror_loss
+    tr_os_loss = tr_metrics.avg_output_stage_loss
+    tr_lm_loss = tr_metrics.avg_lambda_mirror_loss
+    tr_ac_loss = tr_metrics.avg_ac_loss
+    tr_ss_gm_loss = tr_metrics.avg_ss_gm_loss
+    tr_ss_gds_loss = tr_metrics.avg_ss_gds_loss
+    tr_triode_physics_loss = tr_metrics.avg_triode_physics_loss
+    tr_triode_eq1 = tr_metrics.avg_triode_eq1_loss
+    tr_triode_eq2 = tr_metrics.avg_triode_eq2_loss
+    tr_triode_eq3 = tr_metrics.avg_triode_eq3_loss
+    tr_cutoff_physics_loss = tr_metrics.avg_cutoff_physics_loss
+    tr_region_loss = tr_metrics.avg_region_loss
+    _tr_rel_metrics = tr_metrics.rel_metrics
+    tr_ac_comp_detail = tr_metrics.avg_ac_component_losses
+    tr_dc_gain_loss = tr_metrics.avg_dc_gain_loss
+    tr_hc_mirror = tr_metrics.avg_hardcoded_mirror_loss
+
     # Build rows dynamically: (label, train_value, val_value)
     rows = []
     rows.append(("Voltage", f"Loss={tr_v_loss:.4f}  MAE={tr_mae_mv:.1f}mV", f"Loss={val_v_loss:.4f}  MAE={val_mae_mv:.1f}mV"))

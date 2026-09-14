@@ -530,7 +530,7 @@ def main():
         if hasattr(model, 'current_epoch'):
             model.current_epoch = epoch
 
-        loss, mae_norm, voltage_loss, current_loss, current_mae_ua, kcl_loss, diff_pair_loss, mirror_loss, output_stage_loss, lambda_mirror_loss, gm_physics_loss, ac_loss, ss_gm_loss, ss_gds_loss, triode_physics_loss, triode_eq1_loss, triode_eq2_loss, triode_eq3_loss, cutoff_physics_loss, region_loss, train_vov_loss, train_vth_loss, train_ac_comp, train_dc_gain_loss, max_grad_norm, avg_grad_norm, train_gm_id_loss, train_gm_id_aux_loss, train_hc_mirror_loss, train_mirror_pair_detail = train_epoch(
+        train_metrics = train_epoch(
             model, train_loader, optimizer, args.gradient_clip, args.device, scaler,
             predict_currents=predict_currents, current_weight=current_weight,
             voltage_weight=getattr(args, 'voltage_weight', 1.0),
@@ -584,6 +584,33 @@ def main():
             vgsvds_std=vgsvds_std,
         )
 
+        # Bind the TrainMetrics fields this loop reports on. Assignment is by
+        # field name, so adding or reordering a metric in loops.py can no
+        # longer silently shift every value one slot along.
+        loss = train_metrics.avg_loss
+        mae_norm = train_metrics.mae_norm
+        voltage_loss = train_metrics.avg_voltage_loss
+        current_loss = train_metrics.avg_current_loss
+        current_mae_ua = train_metrics.current_mae_ua
+        kcl_loss = train_metrics.avg_kcl_loss
+        diff_pair_loss = train_metrics.avg_diff_pair_loss
+        mirror_loss = train_metrics.avg_mirror_loss
+        output_stage_loss = train_metrics.avg_output_stage_loss
+        lambda_mirror_loss = train_metrics.avg_lambda_mirror_loss
+        gm_physics_loss = train_metrics.avg_gm_physics_loss
+        ac_loss = train_metrics.avg_ac_loss
+        ss_gm_loss = train_metrics.avg_ss_gm_loss
+        ss_gds_loss = train_metrics.avg_ss_gds_loss
+        triode_physics_loss = train_metrics.avg_triode_physics_loss
+        cutoff_physics_loss = train_metrics.avg_cutoff_physics_loss
+        region_loss = train_metrics.avg_region_loss
+        train_vth_loss = train_metrics.avg_vth_loss
+        train_ac_comp = train_metrics.avg_ac_component_losses
+        train_dc_gain_loss = train_metrics.avg_dc_gain_loss
+        max_grad_norm = train_metrics.max_grad_norm
+        avg_grad_norm = train_metrics.avg_grad_norm
+        train_hc_mirror_loss = train_metrics.avg_hardcoded_mirror_loss
+
         mae_mv = mae_norm * vdc_std * 1000
         train_losses.append(loss)
         train_voltage_losses.append(voltage_loss)
@@ -609,7 +636,7 @@ def main():
         # Validation
         if val_loader and epoch % val_freq == 0:
             eval_model = model
-            val_loss, val_mae_mv, val_v_loss, val_c_loss, val_c_mae, acc80, acc50, acc20, acc10, current_acc50, current_acc20, current_acc10, current_acc5, val_kcl_loss, val_dp_loss, val_mirror_loss, val_os_loss, val_lm_loss, val_gm_physics_loss, val_ac_loss, val_ss_gm_loss, val_ss_gds_loss, val_triode_physics_loss, val_triode_eq1_loss, val_triode_eq2_loss, val_triode_eq3_loss, val_cutoff_physics_loss, val_region_loss, val_rel_metrics, val_vov_loss, val_vth_loss, val_ac_comp, val_dc_gain_loss, val_gm_id_loss, val_gm_id_aux_loss, val_hc_mirror_loss, val_mirror_pair_detail = validate(
+            val_metrics = validate(
                 eval_model, val_loader, args.device, vdc_mean, vdc_std, current_mean, current_std,
                 predict_currents=predict_currents, current_weight=current_weight,
                 voltage_weight=getattr(args, 'voltage_weight', 1.0),
@@ -656,6 +683,43 @@ def main():
                 mirror_pair_names=mirror_pair_names,
                 ac_pred_filter=getattr(args, 'ac_pred_filter', False),
             )
+
+            # Bind the ValMetrics fields this loop reports on (see the
+            # TrainMetrics note above: assignment is by field name).
+            val_loss = val_metrics.avg_loss
+            val_mae_mv = val_metrics.mae_mv
+            val_v_loss = val_metrics.avg_voltage_loss
+            val_c_loss = val_metrics.avg_current_loss
+            val_c_mae = val_metrics.current_mae_ua
+            acc80 = val_metrics.acc80
+            acc50 = val_metrics.acc50
+            acc20 = val_metrics.acc20
+            acc10 = val_metrics.acc10
+            current_acc50 = val_metrics.current_acc50
+            current_acc20 = val_metrics.current_acc20
+            current_acc10 = val_metrics.current_acc10
+            current_acc5 = val_metrics.current_acc5
+            val_kcl_loss = val_metrics.avg_kcl_loss
+            val_dp_loss = val_metrics.avg_diff_pair_loss
+            val_mirror_loss = val_metrics.avg_mirror_loss
+            val_os_loss = val_metrics.avg_output_stage_loss
+            val_lm_loss = val_metrics.avg_lambda_mirror_loss
+            val_gm_physics_loss = val_metrics.avg_gm_physics_loss
+            val_ac_loss = val_metrics.avg_ac_loss
+            val_ss_gm_loss = val_metrics.avg_ss_gm_loss
+            val_ss_gds_loss = val_metrics.avg_ss_gds_loss
+            val_triode_physics_loss = val_metrics.avg_triode_physics_loss
+            val_triode_eq1_loss = val_metrics.avg_triode_eq1_loss
+            val_triode_eq2_loss = val_metrics.avg_triode_eq2_loss
+            val_triode_eq3_loss = val_metrics.avg_triode_eq3_loss
+            val_cutoff_physics_loss = val_metrics.avg_cutoff_physics_loss
+            val_region_loss = val_metrics.avg_region_loss
+            val_rel_metrics = val_metrics.rel_metrics
+            val_vth_loss = val_metrics.avg_vth_loss
+            val_ac_comp = val_metrics.avg_ac_component_losses
+            val_dc_gain_loss = val_metrics.avg_dc_gain_loss
+            val_hc_mirror_loss = val_metrics.avg_hardcoded_mirror_loss
+            val_mirror_pair_detail = val_metrics.avg_mirror_pair_losses
 
             val_losses.append(val_loss)
             val_maes.append(val_mae_mv)

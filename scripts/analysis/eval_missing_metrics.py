@@ -188,16 +188,15 @@ def evaluate_experiment(exp, device):
         ss_gds_std=gds_std,
     )
 
-    # 5. Extract all metrics
-    (avg_loss, mae_mv, avg_voltage_loss, avg_current_loss, current_mae_ua,
-     acc80, acc50, acc20, acc10,
-     current_acc50, current_acc20, current_acc10, current_acc5,
-     avg_kcl_loss, avg_diff_pair_loss, avg_mirror_loss, avg_output_stage_loss,
-     avg_lambda_mirror_loss, avg_gm_physics_loss, avg_ac_loss,
-     avg_ss_gm_loss, avg_ss_gds_loss,
-     avg_triode_physics_loss, avg_triode_eq1_loss, avg_triode_eq2_loss, avg_triode_eq3_loss,
-     avg_cutoff_physics_loss, avg_region_loss,
-     rel_metrics, avg_vov_loss, avg_vth_loss) = results
+    # 5. Extract all metrics (results is a ValMetrics dataclass)
+    avg_loss = results.avg_loss
+    mae_mv = results.mae_mv
+    current_mae_ua = results.current_mae_ua
+    acc80 = results.acc80
+    acc50 = results.acc50
+    acc20 = results.acc20
+    acc10 = results.acc10
+    rel_metrics = results.rel_metrics
 
     ss = rel_metrics.get('ss_metrics', {}) or {}
 

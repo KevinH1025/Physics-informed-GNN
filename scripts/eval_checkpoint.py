@@ -92,10 +92,10 @@ def main():
                  ss_gds_loss_weight=getattr(ns, 'ss_gds_loss_weight', 0.),
                  dc_gain_loss_weight=dcw, dc_gain_mean=dc_m, dc_gain_std=dc_s)
 
-    # Unpack (same order as validate() return)
-    mae_mv, c_mae = r[1], r[4]
-    acc80, acc50, acc20, acc10 = r[5], r[6], r[7], r[8]
-    rm = r[28]  # rel_metrics
+    # Named fields of the ValMetrics dataclass (was r[1], r[4], r[5]..r[8], r[28])
+    mae_mv, c_mae = r.mae_mv, r.current_mae_ua
+    acc80, acc50, acc20, acc10 = r.acc80, r.acc50, r.acc20, r.acc10
+    rm = r.rel_metrics
 
     # Extract all metrics from rel_metrics (same as train_v3.py lines 1672-1728)
     ia = rm.get('i_abs_acc', {}) if rm else {}

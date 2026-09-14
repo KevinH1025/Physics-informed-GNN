@@ -89,25 +89,21 @@ def evaluate_model(model, data_path, split, stats, config, device):
         huber_delta=huber_delta
     )
 
-    # Unpack results (must match validate() return signature)
-    (avg_loss, mae_mv, avg_voltage_loss, avg_current_loss, current_mae_ua,
-     acc80, acc50, acc20, acc10, current_acc50, current_acc20, current_acc10, current_acc5,
-     avg_kcl_loss, *_rest) = results
-
+    # results is a ValMetrics dataclass (see circuitgnn.training.loops)
     return {
-        'loss': avg_loss,
-        'voltage_loss': avg_voltage_loss,
-        'current_loss': avg_current_loss,
-        'mae_mv': mae_mv,
-        'current_mae_ua': current_mae_ua,
-        'acc80': acc80,
-        'acc50': acc50,
-        'acc20': acc20,
-        'acc10': acc10,
-        'current_acc50': current_acc50,
-        'current_acc20': current_acc20,
-        'current_acc10': current_acc10,
-        'current_acc5': current_acc5,
+        'loss': results.avg_loss,
+        'voltage_loss': results.avg_voltage_loss,
+        'current_loss': results.avg_current_loss,
+        'mae_mv': results.mae_mv,
+        'current_mae_ua': results.current_mae_ua,
+        'acc80': results.acc80,
+        'acc50': results.acc50,
+        'acc20': results.acc20,
+        'acc10': results.acc10,
+        'current_acc50': results.current_acc50,
+        'current_acc20': results.current_acc20,
+        'current_acc10': results.current_acc10,
+        'current_acc5': results.current_acc5,
         'predict_currents': predict_currents,
     }
 

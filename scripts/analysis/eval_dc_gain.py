@@ -98,11 +98,12 @@ def main():
                  dc_gain_loss_weight=getattr(ns, 'dc_gain_loss_weight', 0.),
                  dc_gain_mean=dc_m, dc_gain_std=dc_s)
 
-    # Unpack validate results
-    val_loss, mae_mv, v_loss, c_loss, c_mae = r[0], r[1], r[2], r[3], r[4]
-    acc80, acc50, acc20, acc10 = r[5], r[6], r[7], r[8]
-    c50, c20, c10, c5 = r[9], r[10], r[11], r[12]
-    rel = r[28]  # rel_metrics dict
+    # Named fields of the ValMetrics dataclass (was r[0]..r[12], r[28])
+    val_loss, mae_mv = r.avg_loss, r.mae_mv
+    v_loss, c_loss, c_mae = r.avg_voltage_loss, r.avg_current_loss, r.current_mae_ua
+    acc80, acc50, acc20, acc10 = r.acc80, r.acc50, r.acc20, r.acc10
+    c50, c20, c10, c5 = r.current_acc50, r.current_acc20, r.current_acc10, r.current_acc5
+    rel = r.rel_metrics
     ss_m = rel.get('ss_metrics') if rel else None
 
     log(f"Voltage MAE: {mae_mv:.2f} mV")

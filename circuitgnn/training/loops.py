@@ -2,6 +2,9 @@
 Training and validation loop functions.
 """
 
+from dataclasses import dataclass, field
+from typing import Dict, Optional
+
 import torch
 import numpy as np
 
@@ -13,6 +16,97 @@ from circuitgnn.training.metrics import (
     denormalize_voltage,
     denormalize_current,
 )
+
+
+@dataclass
+class TrainMetrics:
+    """Per-epoch averages returned by :func:`train_epoch`.
+
+    Field names are the ``avg_*`` locals train_epoch already computed; the
+    declaration order is the order of the 30-element tuple this replaced, so
+    the two can be diffed position by position. Every field is filled in by
+    train_epoch, the defaults only exist so an empty result is constructible.
+    """
+
+    avg_loss: float = 0.0
+    mae_norm: float = 0.0
+    avg_voltage_loss: float = 0.0
+    avg_current_loss: float = 0.0
+    current_mae_ua: float = 0.0
+    avg_kcl_loss: float = 0.0
+    avg_diff_pair_loss: float = 0.0
+    avg_mirror_loss: float = 0.0
+    avg_output_stage_loss: float = 0.0
+    avg_lambda_mirror_loss: float = 0.0
+    avg_gm_physics_loss: float = 0.0
+    avg_ac_loss: float = 0.0
+    avg_ss_gm_loss: float = 0.0
+    avg_ss_gds_loss: float = 0.0
+    avg_triode_physics_loss: float = 0.0
+    avg_triode_eq1_loss: float = 0.0
+    avg_triode_eq2_loss: float = 0.0
+    avg_triode_eq3_loss: float = 0.0
+    avg_cutoff_physics_loss: float = 0.0
+    avg_region_loss: float = 0.0
+    avg_vov_loss: float = 0.0
+    avg_vth_loss: float = 0.0
+    avg_ac_component_losses: Dict[str, float] = field(default_factory=dict)
+    avg_dc_gain_loss: float = 0.0
+    max_grad_norm: float = 0.0
+    avg_grad_norm: float = 0.0
+    avg_gm_id_loss: float = 0.0
+    avg_gm_id_aux_loss: float = 0.0
+    avg_hardcoded_mirror_loss: float = 0.0
+    avg_mirror_pair_losses: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class ValMetrics:
+    """Per-epoch averages and analytics returned by :func:`validate`.
+
+    Same convention as :class:`TrainMetrics`: field names are validate's own
+    locals and the declaration order is the order of the 37-element tuple this
+    replaced. Note ``mae_mv`` (validate denormalizes to mV) where TrainMetrics
+    has ``mae_norm`` (train_epoch reports the normalized MAE).
+    """
+
+    avg_loss: float = 0.0
+    mae_mv: float = 0.0
+    avg_voltage_loss: float = 0.0
+    avg_current_loss: float = 0.0
+    current_mae_ua: float = 0.0
+    acc80: float = 0.0
+    acc50: float = 0.0
+    acc20: float = 0.0
+    acc10: float = 0.0
+    current_acc50: float = 0.0
+    current_acc20: float = 0.0
+    current_acc10: float = 0.0
+    current_acc5: float = 0.0
+    avg_kcl_loss: float = 0.0
+    avg_diff_pair_loss: float = 0.0
+    avg_mirror_loss: float = 0.0
+    avg_output_stage_loss: float = 0.0
+    avg_lambda_mirror_loss: float = 0.0
+    avg_gm_physics_loss: float = 0.0
+    avg_ac_loss: float = 0.0
+    avg_ss_gm_loss: float = 0.0
+    avg_ss_gds_loss: float = 0.0
+    avg_triode_physics_loss: float = 0.0
+    avg_triode_eq1_loss: float = 0.0
+    avg_triode_eq2_loss: float = 0.0
+    avg_triode_eq3_loss: float = 0.0
+    avg_cutoff_physics_loss: float = 0.0
+    avg_region_loss: float = 0.0
+    rel_metrics: Optional[dict] = None
+    avg_vov_loss: float = 0.0
+    avg_vth_loss: float = 0.0
+    avg_ac_component_losses: Dict[str, float] = field(default_factory=dict)
+    avg_dc_gain_loss: float = 0.0
+    avg_gm_id_loss: float = 0.0
+    avg_gm_id_aux_loss: float = 0.0
+    avg_hardcoded_mirror_loss: float = 0.0
+    avg_mirror_pair_losses: Dict[str, float] = field(default_factory=dict)
 
 
 _cached_node_weights = {}
@@ -153,9 +247,7 @@ def train_epoch(model, loader, optimizer, gradient_clip, device, scaler=None,
         ss_gds_loss_weight: Weight for supervised gds loss (0 to disable)
 
     Returns:
-        Tuple of (avg_loss, mae_norm, avg_voltage_loss, avg_current_loss, current_mae_ua,
-                  avg_kcl_loss, avg_diff_pair_loss, avg_mirror_loss, avg_output_stage_loss,
-                  avg_lambda_mirror_loss, avg_gm_loss, avg_ac_loss, avg_ss_gm_loss, avg_ss_gds_loss)
+        TrainMetrics with the epoch-averaged losses and the gradient norms.
     """
     model.train()
     total_loss = 0
@@ -469,7 +561,38 @@ def train_epoch(model, loader, optimizer, gradient_clip, device, scaler=None,
     avg_mirror_pair_losses = {k: v / total_count for k, v in total_mirror_pair_losses.items()} if total_mirror_pair_losses else {}
     avg_grad_norm = sum_grad_norm / max(grad_norm_count, 1)
 
-    return avg_loss, mae_norm, avg_voltage_loss, avg_current_loss, current_mae_ua, avg_kcl_loss, avg_diff_pair_loss, avg_mirror_loss, avg_output_stage_loss, avg_lambda_mirror_loss, avg_gm_physics_loss, avg_ac_loss, avg_ss_gm_loss, avg_ss_gds_loss, avg_triode_physics_loss, avg_triode_eq1_loss, avg_triode_eq2_loss, avg_triode_eq3_loss, avg_cutoff_physics_loss, avg_region_loss, avg_vov_loss, avg_vth_loss, avg_ac_component_losses, avg_dc_gain_loss, max_grad_norm, avg_grad_norm, avg_gm_id_loss, avg_gm_id_aux_loss, avg_hardcoded_mirror_loss, avg_mirror_pair_losses
+    return TrainMetrics(
+        avg_loss=avg_loss,
+        mae_norm=mae_norm,
+        avg_voltage_loss=avg_voltage_loss,
+        avg_current_loss=avg_current_loss,
+        current_mae_ua=current_mae_ua,
+        avg_kcl_loss=avg_kcl_loss,
+        avg_diff_pair_loss=avg_diff_pair_loss,
+        avg_mirror_loss=avg_mirror_loss,
+        avg_output_stage_loss=avg_output_stage_loss,
+        avg_lambda_mirror_loss=avg_lambda_mirror_loss,
+        avg_gm_physics_loss=avg_gm_physics_loss,
+        avg_ac_loss=avg_ac_loss,
+        avg_ss_gm_loss=avg_ss_gm_loss,
+        avg_ss_gds_loss=avg_ss_gds_loss,
+        avg_triode_physics_loss=avg_triode_physics_loss,
+        avg_triode_eq1_loss=avg_triode_eq1_loss,
+        avg_triode_eq2_loss=avg_triode_eq2_loss,
+        avg_triode_eq3_loss=avg_triode_eq3_loss,
+        avg_cutoff_physics_loss=avg_cutoff_physics_loss,
+        avg_region_loss=avg_region_loss,
+        avg_vov_loss=avg_vov_loss,
+        avg_vth_loss=avg_vth_loss,
+        avg_ac_component_losses=avg_ac_component_losses,
+        avg_dc_gain_loss=avg_dc_gain_loss,
+        max_grad_norm=max_grad_norm,
+        avg_grad_norm=avg_grad_norm,
+        avg_gm_id_loss=avg_gm_id_loss,
+        avg_gm_id_aux_loss=avg_gm_id_aux_loss,
+        avg_hardcoded_mirror_loss=avg_hardcoded_mirror_loss,
+        avg_mirror_pair_losses=avg_mirror_pair_losses,
+    )
 
 
 def validate(model, loader, device, vdc_mean, vdc_std, current_mean, current_std,
@@ -513,11 +636,8 @@ def validate(model, loader, device, vdc_mean, vdc_std, current_mean, current_std
         stage2_weight: Weight multiplier for stage 2 nodes (1.0 = disabled)
 
     Returns:
-        Tuple of (avg_loss, mae_mv, avg_voltage_loss, avg_current_loss, current_mae_ua,
-                  acc80, acc50, acc20, acc10, current_acc50, current_acc20, current_acc10, current_acc5,
-                  avg_kcl_loss, avg_diff_pair_loss, avg_mirror_loss, avg_output_stage_loss,
-                  avg_lambda_mirror_loss, avg_gm_physics_loss, avg_ac_loss, avg_ss_gm_loss, avg_ss_gds_loss,
-                  avg_triode_physics_loss, avg_triode_eq1/2/3_loss, avg_cutoff_physics_loss, avg_region_loss)
+        ValMetrics with the epoch-averaged losses, the voltage/current accuracy
+        buckets and the rel_metrics analytics dict.
     """
     model.eval()
     total_loss = 0
@@ -1023,7 +1143,45 @@ def validate(model, loader, device, vdc_mean, vdc_std, current_mean, current_std
         ugbw_arr = np.array(all_ugbw_rel_errors)
         rel_metrics['ugbw_acc'] = {t: float((ugbw_arr < t).mean() * 100) for t in [5, 10, 20]}
 
-    return avg_loss, mae_mv, avg_voltage_loss, avg_current_loss, current_mae_ua, acc80, acc50, acc20, acc10, current_acc50, current_acc20, current_acc10, current_acc5, avg_kcl_loss, avg_diff_pair_loss, avg_mirror_loss, avg_output_stage_loss, avg_lambda_mirror_loss, avg_gm_physics_loss, avg_ac_loss, avg_ss_gm_loss, avg_ss_gds_loss, avg_triode_physics_loss, avg_triode_eq1_loss, avg_triode_eq2_loss, avg_triode_eq3_loss, avg_cutoff_physics_loss, avg_region_loss, rel_metrics, avg_vov_loss, avg_vth_loss, avg_ac_component_losses, avg_dc_gain_loss, avg_gm_id_loss, avg_gm_id_aux_loss, avg_hardcoded_mirror_loss, avg_mirror_pair_losses
+    return ValMetrics(
+        avg_loss=avg_loss,
+        mae_mv=mae_mv,
+        avg_voltage_loss=avg_voltage_loss,
+        avg_current_loss=avg_current_loss,
+        current_mae_ua=current_mae_ua,
+        acc80=acc80,
+        acc50=acc50,
+        acc20=acc20,
+        acc10=acc10,
+        current_acc50=current_acc50,
+        current_acc20=current_acc20,
+        current_acc10=current_acc10,
+        current_acc5=current_acc5,
+        avg_kcl_loss=avg_kcl_loss,
+        avg_diff_pair_loss=avg_diff_pair_loss,
+        avg_mirror_loss=avg_mirror_loss,
+        avg_output_stage_loss=avg_output_stage_loss,
+        avg_lambda_mirror_loss=avg_lambda_mirror_loss,
+        avg_gm_physics_loss=avg_gm_physics_loss,
+        avg_ac_loss=avg_ac_loss,
+        avg_ss_gm_loss=avg_ss_gm_loss,
+        avg_ss_gds_loss=avg_ss_gds_loss,
+        avg_triode_physics_loss=avg_triode_physics_loss,
+        avg_triode_eq1_loss=avg_triode_eq1_loss,
+        avg_triode_eq2_loss=avg_triode_eq2_loss,
+        avg_triode_eq3_loss=avg_triode_eq3_loss,
+        avg_cutoff_physics_loss=avg_cutoff_physics_loss,
+        avg_region_loss=avg_region_loss,
+        rel_metrics=rel_metrics,
+        avg_vov_loss=avg_vov_loss,
+        avg_vth_loss=avg_vth_loss,
+        avg_ac_component_losses=avg_ac_component_losses,
+        avg_dc_gain_loss=avg_dc_gain_loss,
+        avg_gm_id_loss=avg_gm_id_loss,
+        avg_gm_id_aux_loss=avg_gm_id_aux_loss,
+        avg_hardcoded_mirror_loss=avg_hardcoded_mirror_loss,
+        avg_mirror_pair_losses=avg_mirror_pair_losses,
+    )
 
 
 def validate_simple(model, loader, device, vdc_mean, vdc_std, current_mean, current_std,

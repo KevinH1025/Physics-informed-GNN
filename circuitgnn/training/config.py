@@ -287,7 +287,7 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Iterative-refinement: precomputed per-node LUT op-point features
     # (id, gm, gds at the pass-1-predicted bias). Dataset must be patched
-    # with scripts/patch_dataset_lut_op_features.py first.
+    # with scripts/migrations/patch_dataset_lut_op_features.py first.
     lut_op_cfg = model_cfg.get('lut_op_features', {})
     args['lut_op_features_config'] = {
         'enabled': lut_op_cfg.get('enabled', False),
@@ -295,14 +295,14 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Stacking variant: pass the frozen baseline's own predictions back as
     # extra input features (V₀, I₀, gm₀, gds₀ per node). Dataset must be
-    # patched with scripts/patch_dataset_stack_features.py first.
+    # patched with scripts/migrations/patch_dataset_stack_features.py first.
     stack_cfg = model_cfg.get('stack_features', {})
     args['stack_features_config'] = {
         'enabled': stack_cfg.get('enabled', False),
     }
 
     # 5-dim per-MOSFET physical descriptor from canonical-bias LUT lookups.
-    # Dataset must be patched with scripts/patch_dataset_mosfet_descriptor.py.
+    # Dataset must be patched with scripts/migrations/patch_dataset_mosfet_descriptor.py.
     desc_cfg = model_cfg.get('mosfet_descriptor', {})
     args['mosfet_descriptor_config'] = {
         'enabled': desc_cfg.get('enabled', False),
@@ -310,7 +310,7 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     # Per-MOSFET functional role one-hot (input pair, bias mirror, output...).
-    # Dataset must be patched with scripts/patch_dataset_mosfet_role.py.
+    # Dataset must be patched with scripts/migrations/patch_dataset_mosfet_role.py.
     role_cfg = model_cfg.get('mosfet_role', {})
     args['mosfet_role_config'] = {
         'enabled': role_cfg.get('enabled', False),
@@ -318,7 +318,7 @@ def parse_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     # Per-net role one-hot (VDD/GND/SIG_IN/SIG_OUT/INTERNAL).
-    # Dataset must be patched with scripts/patch_dataset_net_role.py.
+    # Dataset must be patched with scripts/migrations/patch_dataset_net_role.py.
     net_role_cfg = model_cfg.get('net_role', {})
     args['net_role_config'] = {
         'enabled': net_role_cfg.get('enabled', False),

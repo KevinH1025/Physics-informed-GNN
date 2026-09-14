@@ -2,7 +2,7 @@
 
 Declares the attribute layout of the pickled PyG ``Data``/``Batch`` objects
 produced by ``CircuitGraphBuilder.build_from_netlist`` and the
-``scripts/patch_dataset_*.py`` migrations. Every attribute name, shape and
+``scripts/migrations/patch_dataset_*.py`` migrations. Every attribute name, shape and
 column meaning below is a load-bearing on-disk contract: pickled datasets,
 the prebatched variants and all consumers (loaders, losses, models, eval
 scripts) rely on it byte for byte. This module is documentation plus

@@ -128,7 +128,7 @@ class PretrainCombinedLoader:
         self._topo_mosfet_term: Dict[str, torch.Tensor] = {}
 
         # Per-topology stacks for physics-pretrain extras (varying per sample).
-        # These are present after running scripts/patch_pretrain_combined.py.
+        # These are present after running scripts/migrations/patch_pretrain_combined.py.
         self._topo_wl_um: Dict[str, torch.Tensor] = {}     # [n, M, 2] µm
         self._topo_m: Dict[str, torch.Tensor] = {}          # [n, M] effective multiplier
         self._topo_v_targets: Dict[str, torch.Tensor] = {}  # [n, N] node V (SPICE truth)
@@ -315,7 +315,7 @@ class PretrainCombinedLoader:
         return out[out >= 0]
 
     # Net role classification: 5 classes (VDD/GND/SIG_IN/SIG_OUT/INTERNAL).
-    # Same logic as scripts/patch_dataset_net_role.py — shared core lives in
+    # Same logic as scripts/migrations/patch_dataset_net_role.py — shared core lives in
     # circuitgnn.data.net_roles so the combined corpus doesn't need a
     # separate patch step.
     _NET_ROLE_DIM = net_roles.NET_ROLE_DIM

@@ -2162,7 +2162,7 @@ class TowerGENConv(BaseGNN):
             if lut_feat is None:
                 raise RuntimeError('lut_op_features enabled but batch has no '
                                    '`node_lut_features` — re-patch the dataset '
-                                   'with scripts/patch_dataset_lut_op_features.py')
+                                   'with scripts/migrations/patch_dataset_lut_op_features.py')
             x_proj_input = torch.cat(
                 [x_proj_input, lut_feat.to(x_proj_input.dtype).to(x_proj_input.device)],
                 dim=-1,
@@ -2173,7 +2173,7 @@ class TowerGENConv(BaseGNN):
             if stack_feat is None:
                 raise RuntimeError('stack_features enabled but batch has no '
                                    '`node_stack_features` — re-patch the dataset '
-                                   'with scripts/patch_dataset_stack_features.py')
+                                   'with scripts/migrations/patch_dataset_stack_features.py')
             x_proj_input = torch.cat(
                 [x_proj_input, stack_feat.to(x_proj_input.dtype).to(x_proj_input.device)],
                 dim=-1,

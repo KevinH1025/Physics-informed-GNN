@@ -4,7 +4,7 @@ Shared core used by both classification paths:
   - ``CircuitGraphBuilder._classify_net`` (graph build time) — returns the
     string category 'gnd'/'vdd'/'input'/'output'/'internal'.
   - ``PretrainCombinedLoader._classify_net`` (and
-    scripts/patch_dataset_net_role.py) — returns the 5-class integer role
+    scripts/migrations/patch_dataset_net_role.py) — returns the 5-class integer role
     used for the ``net_role`` one-hot dataset attribute.
 
 The two callers agree on every predicate except one: the pretrain/patch

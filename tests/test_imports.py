@@ -27,10 +27,17 @@ PUBLIC_MODULES = [
     'circuitgnn.gnn.components.layers',
     'circuitgnn.gnn.components.virtual_node',
     'circuitgnn.training.checkpoint',
+    'circuitgnn.training.cli',
     'circuitgnn.training.config',
     'circuitgnn.training.data_loading',
+    'circuitgnn.training.diagnostics',
+    'circuitgnn.training.finalize',
     'circuitgnn.training.loops',
     'circuitgnn.training.losses',
+    'circuitgnn.training.setup_data',
+    'circuitgnn.training.transfer',
+    'circuitgnn.training.warmup',
+    'circuitgnn.evaluation',
 ]
 
 

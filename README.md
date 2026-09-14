@@ -36,7 +36,19 @@ Physics helps only when the physics is exact.
 
 Of every relation tried as a training constraint, **only Kirchhoff's current law improves the model**. Every approximate device relation makes it worse: the square-law and sub-threshold transconductance formulas, the current-mirror and differential-pair equalities and the single-pole bandwidth relation. This holds even for the most accurate unified formula tested and even for an exact auxiliary consistency term that is not a conservation law.
 
-The reason is that the ground truth is BSIM4. The gap between a textbook equation and the simulator is not noise that averages out, it is a fixed error the constraint carries with it. The parameters those formulas treat as constant (threshold voltage, the transconductance parameter, the sub-threshold slope factor) are not constant in BSIM4, so even a formula with the right shape uses the wrong numbers. Kirchhoff's current law escapes this because it is not a device equation at all. It is current conservation, exact in any region and any process.
+Adding the KCL loss lowers the error at every training-set size on every quantity. The benefit is largest when data is scarce: with 100 training samples the constrained model already matches the voltage error the unconstrained model only reaches with 1,000.
+
+![Data efficiency with and without KCL](docs/images/data_efficiency.png)
+
+*Validation error against training-set size on `fan_smc`, with the KCL loss (green) and without it (red). Lower is better.*
+
+The reason approximate physics fails is that the ground truth is BSIM4. The gap between a textbook equation and the simulator is not noise that averages out, it is a fixed error the constraint carries with it. The parameters those formulas treat as constant are not constant in BSIM4, so even a formula with the right shape uses the wrong numbers:
+
+<p align="center"><img src="docs/images/parameter_spread.png" alt="Spread of textbook constants in BSIM4" width="85%"></p>
+
+*Three quantities the textbook equations treat as fixed, measured across the dataset: (a) the transconductance parameter, (b) the threshold voltage and (c) the sub-threshold slope factor. None of them is constant.*
+
+Kirchhoff's current law escapes this because it is not a device equation at all. It is current conservation, exact in any region and any process.
 
 A second finding concerns where exact physics belongs. When a law is exact it is better built into the architecture than added to the loss, because then the model cannot violate it and spends no capacity learning to satisfy it:
 

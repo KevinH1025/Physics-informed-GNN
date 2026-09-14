@@ -104,7 +104,19 @@ What each part of a backbone layer contributes:
 
 The outputs of all eight layers are merged by attention-weighted jumping knowledge rather than using only the last one and a skip connection carries the raw device and type features to the heads. Eight layers was the best depth: four and six are too shallow while twelve and sixteen start to over-smooth.
 
-Ablations behind these choices (message-passing operator, attention components, depth, head design) are reproducible from the configs under `configs/gnn/tower/`.
+The DC-gain head builds on the three-stage gain formula
+
+$$
+A_{DC} = A_1 \cdot R_{out3} \cdot \left(g_{m,M11} + A_2\, g_{m,M23}\right)
+$$
+
+where $A_1$ and $A_2$ are the first and second stage gains and $R_{out3}$ is the output-stage resistance. The first stage uses a cascode output resistance and the third stage is treated as push-pull, so the feedforward device M11 contributes to the gain. The exact form matters a lot. Evaluated on the simulated gm and gds, this formula lands within 2.70 dB of the simulator on average while the textbook class-A formulation is off by more than 40 dB:
+
+<p align="center"><img src="docs/images/dc_gain_formulas.png" alt="Candidate DC-gain formulas" width="55%"></p>
+
+*Four candidate gain formulas evaluated on the simulated gm and gds of `fan_smc`. (a) The chosen formula and (b) a simpler first-stage variant follow the diagonal. (c) and (d) model the output as class-A and miss the push-pull path.*
+
+Ablations behind every choice above (message-passing operator, attention components, depth, head design) are reproducible from the configs under `configs/gnn/tower/`.
 
 ## Repository layout
 

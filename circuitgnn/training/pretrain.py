@@ -1,11 +1,15 @@
-"""Pretraining utilities: masking + epoch loops."""
+"""Pretraining utilities: masking, epoch loops and script scaffolding."""
 
 from __future__ import annotations
 
-from typing import Tuple
+import sys
+from pathlib import Path
+from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+import yaml
+from tqdm import tqdm
 
 
 # Indices of (W, L, wl_ratio, M) within data.x. These are the design
@@ -190,3 +194,102 @@ def pretrain_validate(
         'loss': total_loss / max(1, total_items),
         'mae': total_mae / max(1, total_items),
     }
+
+
+# ── Shared script scaffolding ─────────────────────────────────────────────
+# The pretrain entry scripts (scripts/pretrain_*.py) share the same run
+# skeleton: an experiments/<name> output dir holding original_config.yaml
+# and training.log, an Adam optimizer plus optional plateau scheduler read
+# from the YAML config, one tqdm bar spanning all epochs, best.pt saved on
+# val improvement (scheduler stepped first) and the full log rewritten at
+# each logged epoch. The helpers below are the provably common pieces.
+# Everything that differs between scripts stays in the scripts: loss
+# computation and augmentation, log message formats, validation cadence,
+# early stopping and any extra checkpoint schema.
+
+
+def prepare_out_dir(out_dir, cfg) -> Path:
+    """Create the run dir, save original_config.yaml, return the log path."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / 'original_config.yaml', 'w') as f:
+        yaml.safe_dump(cfg, f)
+    return out_dir / 'training.log'
+
+
+def build_adam(model, cfg) -> torch.optim.Adam:
+    """Adam from cfg['optimizer']: lr required, weight_decay default 0.0."""
+    opt_cfg = cfg['optimizer']
+    return torch.optim.Adam(
+        model.parameters(),
+        lr=opt_cfg['lr'],
+        weight_decay=opt_cfg.get('weight_decay', 0.0),
+    )
+
+
+def build_plateau_scheduler(optimizer, cfg, default_patience: int = 30):
+    """ReduceLROnPlateau iff cfg['scheduler']['type'] == 'plateau', else None."""
+    sch_cfg = cfg.get('scheduler', {})
+    if sch_cfg.get('type') != 'plateau':
+        return None
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min',
+        patience=sch_cfg.get('patience', default_patience),
+        factor=sch_cfg.get('factor', 0.5),
+        min_lr=sch_cfg.get('min_lr', 1e-6),
+    )
+
+
+def make_progress_bar(epochs: int, batches_per_epoch: int, desc: str) -> tqdm:
+    """One tqdm bar covering every training step of the run."""
+    return tqdm(total=epochs * batches_per_epoch, desc=desc, dynamic_ncols=True)
+
+
+def scheduler_step_and_save_best(
+    val_metric: float,
+    best_val: float,
+    epoch: int,
+    model,
+    cfg,
+    out_dir,
+    msg: str,
+    scheduler=None,
+    extra_ckpt: Optional[dict] = None,
+) -> Tuple[float, str]:
+    """Shared epoch-end skeleton: scheduler step, then best.pt on improvement.
+
+    Steps the (plateau) scheduler on `val_metric`; if `val_metric` improves
+    on `best_val`, saves out_dir/best.pt as {'epoch', 'model_state_dict',
+    *extra_ckpt, 'config'} (the state_dict of whichever module the script
+    passes, e.g. the backbone only) and appends ' [BEST]' to `msg`.
+
+    Returns (best_val, msg).
+    """
+    if scheduler is not None:
+        scheduler.step(val_metric)
+    if val_metric < best_val:
+        best_val = val_metric
+        ckpt = {'epoch': epoch, 'model_state_dict': model.state_dict()}
+        if extra_ckpt:
+            ckpt.update(extra_ckpt)
+        ckpt['config'] = cfg
+        torch.save(ckpt, Path(out_dir) / 'best.pt')
+        msg += ' [BEST]'
+    return best_val, msg
+
+
+def write_log_line(msg: str, log_lines: list, log_path) -> None:
+    """Print above the tqdm bar and rewrite training.log with all lines."""
+    tqdm.write(msg, file=sys.stdout)
+    log_lines.append(msg)
+    with open(log_path, 'w') as f:
+        f.write('\n'.join(log_lines) + '\n')
+
+
+def save_final_checkpoint(out_dir, epochs: int, model, cfg) -> None:
+    """Save out_dir/final.pt as {'epoch': epochs - 1, 'model_state_dict', 'config'}."""
+    torch.save({
+        'epoch': epochs - 1,
+        'model_state_dict': model.state_dict(),
+        'config': cfg,
+    }, Path(out_dir) / 'final.pt')

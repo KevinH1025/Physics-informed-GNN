@@ -322,23 +322,20 @@ class PretrainBackbone(nn.Module):
             x = torch.cat([x, data.type_tens], dim=-1)
         return x
 
-    def forward(
-        self,
-        data,
-        mask_indices: Optional[torch.Tensor] = None,
-    ):
-        """Run backbone and predict masked features.
+    def encode(self, data) -> torch.Tensor:
+        """Run the backbone stack and return per-node embeddings.
+
+        Public entry point for external heads (e.g. contrastive or physics
+        pretraining models) so they do not need to re-implement the
+        layer-by-layer loop (VN injection, message passing, loop attention
+        with warmup). This is exactly the hidden computation `forward` runs
+        before the mask head.
 
         Args:
-            data: PretrainBatch with x (already masked) + structural tensors.
-            mask_indices: [K] node indices (in batched node space) where the
-                mask head should produce predictions. If None, predict at all
-                MOSFET terminal nodes (`data.batched_mosfet_term`).
+            data: PretrainBatch with x + structural tensors.
 
         Returns:
-            dict with:
-              'mask_pred': [K, mask_target_dim] predicted features
-              'backbone_hidden': [N, hidden_dim] full backbone embedding
+            [N, hidden_dim] backbone embedding for every node.
         """
         x_in = self._get_input_features(data)
         x = self.input_linear(x_in)
@@ -406,6 +403,28 @@ class PretrainBackbone(nn.Module):
             if vn_is_default:
                 vn_emb, _ = self.virtual_node(x, vn_emb, batch_vec, num_graphs)
 
+        return x
+
+    def forward(
+        self,
+        data,
+        mask_indices: Optional[torch.Tensor] = None,
+    ):
+        """Run backbone and predict masked features.
+
+        Args:
+            data: PretrainBatch with x (already masked) + structural tensors.
+            mask_indices: [K] node indices (in batched node space) where the
+                mask head should produce predictions. If None, predict at all
+                MOSFET terminal nodes (`data.batched_mosfet_term`).
+
+        Returns:
+            dict with:
+              'mask_pred': [K, mask_target_dim] predicted features
+              'backbone_hidden': [N, hidden_dim] full backbone embedding
+        """
+        x = self.encode(data)
+
         # Mask prediction at requested nodes
         if mask_indices is None:
             mask_indices = data.batched_mosfet_term
@@ -416,3 +435,52 @@ class PretrainBackbone(nn.Module):
             'mask_pred': mask_pred,
             'backbone_hidden': x,
         }
+
+
+def build_pretrain_backbone(
+    cfg: dict,
+    node_feature_dim: int,
+    type_feature_dim: int,
+    *,
+    backbone_layers_default: int = 8,
+    mask_target_dim: int = 4,
+    mask_head_hidden: int = 64,
+) -> PretrainBackbone:
+    """Build a PretrainBackbone from a pretrain YAML config dict.
+
+    Single home for the cfg-to-kwargs mapping that was previously copied
+    into each pretrain script. The copies differed only in the
+    backbone_layers default (6 in pretrain_v1, 8 elsewhere) and in where
+    the mask-head dims came from (cfg['pretrain'] vs hardcoded), so those
+    are keyword parameters supplied by the call site.
+    """
+    m = cfg['model']
+    tower = m.get('tower', {})
+    vn = m.get('virtual_node', {})
+    loop = tower.get('loop_attention', {})
+    return PretrainBackbone(
+        node_feature_dim=node_feature_dim,
+        type_feature_dim=type_feature_dim,
+        hidden_dim=m['hidden_dim'],
+        backbone_layers=tower.get('backbone_layers', backbone_layers_default),
+        genconv_num_layers=m.get('genconv_num_layers', 2),
+        norm_type=m.get('norm_type', 'layer'),
+        act_type=m.get('act_type', 'gelu'),
+        dropout=m.get('dropout', 0.0),
+        skip_connection=m.get('skip_connection', False),
+        conv_type=m.get('conv_type', 'gin'),
+        mlp_depth=m.get('mlp_depth', 3),
+        use_virtual_node=vn.get('enabled', True),
+        vn_mode=vn.get('mode', 'mha'),
+        vn_num_heads=vn.get('num_heads', 4),
+        vn_head_dim=vn.get('head_dim', 32),
+        vn_gate_broadcast=vn.get('gate_broadcast', True),
+        use_loop_attention=loop.get('enabled', False),
+        loop_num_heads=loop.get('num_heads', 4),
+        loop_head_dim=loop.get('head_dim', 32),
+        loop_fusion=loop.get('fusion', 'gate'),
+        loop_warmup_epochs=loop.get('warmup_epochs', 0),
+        loop_warmup_duration=loop.get('warmup_duration', 0),
+        mask_target_dim=mask_target_dim,
+        mask_head_hidden=mask_head_hidden,
+    )

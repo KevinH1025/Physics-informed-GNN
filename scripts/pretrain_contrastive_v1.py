@@ -25,12 +25,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
-from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader, PretrainBatch
-from circuitgnn.gnn.architectures.pretrain_backbone import PretrainBackbone
+from circuitgnn.gnn.architectures.pretrain_backbone import (
+    PretrainBackbone,
+    build_pretrain_backbone,
+)
+from circuitgnn.training.pretrain import (
+    build_adam,
+    build_plateau_scheduler,
+    make_progress_bar,
+    prepare_out_dir,
+    save_final_checkpoint,
+    scheduler_step_and_save_best,
+    write_log_line,
+)
 
 
 class ContrastivePretrainModel(nn.Module):
@@ -51,6 +62,14 @@ class ContrastivePretrainModel(nn.Module):
 
     def encode_graph(self, data) -> torch.Tensor:
         """Run backbone → mean-pool over each graph → projection.
+
+        NOTE: the layer loop below is a manual copy of
+        PretrainBackbone.encode() that has DRIFTED from it: it omits the
+        default-mode virtual node path (init_embedding, per-layer broadcast,
+        post-layer VN state update). It matches encode() bitwise only when
+        the VN is disabled or vn mode == 'mha'; with vn mode 'default' this
+        loop silently skips the VN while encode() applies it. Kept as is to
+        preserve behavior; not switched to backbone.encode().
 
         Returns:
             [num_graphs, proj_dim] L2-normalized embeddings.
@@ -159,37 +178,6 @@ def parse_args():
     return p.parse_args()
 
 
-def build_backbone(cfg, node_dim, type_dim) -> PretrainBackbone:
-    m = cfg['model']
-    tower = m.get('tower', {})
-    vn = m.get('virtual_node', {})
-    loop = tower.get('loop_attention', {})
-    return PretrainBackbone(
-        node_feature_dim=node_dim, type_feature_dim=type_dim,
-        hidden_dim=m['hidden_dim'],
-        backbone_layers=tower.get('backbone_layers', 8),
-        genconv_num_layers=m.get('genconv_num_layers', 2),
-        norm_type=m.get('norm_type', 'layer'),
-        act_type=m.get('act_type', 'gelu'),
-        dropout=m.get('dropout', 0.0),
-        skip_connection=m.get('skip_connection', False),
-        conv_type=m.get('conv_type', 'gin'),
-        mlp_depth=m.get('mlp_depth', 3),
-        use_virtual_node=vn.get('enabled', True),
-        vn_mode=vn.get('mode', 'mha'),
-        vn_num_heads=vn.get('num_heads', 4),
-        vn_head_dim=vn.get('head_dim', 32),
-        vn_gate_broadcast=vn.get('gate_broadcast', True),
-        use_loop_attention=loop.get('enabled', False),
-        loop_num_heads=loop.get('num_heads', 4),
-        loop_head_dim=loop.get('head_dim', 32),
-        loop_fusion=loop.get('fusion', 'gate'),
-        loop_warmup_epochs=loop.get('warmup_epochs', 0),
-        loop_warmup_duration=loop.get('warmup_duration', 0),
-        mask_target_dim=4, mask_head_hidden=64,
-    )
-
-
 def main():
     args = parse_args()
     with open(args.config) as f:
@@ -213,7 +201,7 @@ def main():
     type_dim = sample.type_tens.shape[-1]
     print(f'node_feature_dim={node_dim}, type_feature_dim={type_dim}')
 
-    backbone = build_backbone(cfg, node_dim, type_dim)
+    backbone = build_pretrain_backbone(cfg, node_dim, type_dim)
     proj_dim = cfg['contrastive'].get('proj_dim', 64)
     model = ContrastivePretrainModel(backbone, cfg['model']['hidden_dim'], proj_dim).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -225,30 +213,17 @@ def main():
     temperature = float(contrast_cfg.get('temperature', 0.5))
     print(f'Augmentation: feat_noise={feat_noise}, edge_drop={edge_drop}, temp={temperature}')
 
-    opt = torch.optim.Adam(model.parameters(),
-                           lr=cfg['optimizer']['lr'],
-                           weight_decay=cfg['optimizer'].get('weight_decay', 0.0))
-    sch = None
-    sch_cfg = cfg.get('scheduler', {})
-    if sch_cfg.get('type') == 'plateau':
-        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            opt, mode='min',
-            patience=sch_cfg.get('patience', 30),
-            factor=sch_cfg.get('factor', 0.5),
-            min_lr=sch_cfg.get('min_lr', 1e-6),
-        )
+    opt = build_adam(model, cfg)
+    sch = build_plateau_scheduler(opt, cfg)
 
     epochs = cfg['training']['epochs']
     grad_clip = cfg['training'].get('gradient_clip', 1.0)
     out_dir = Path(f"datasets/{Path(train_path).parent.name}/experiments/{args.name}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / 'original_config.yaml', 'w') as f:
-        yaml.safe_dump(cfg, f)
-    log_path = out_dir / 'training.log'
+    log_path = prepare_out_dir(out_dir, cfg)
     log_lines = []
     best_val = float('inf')
 
-    pbar = tqdm(total=epochs * len(train_loader), desc='Contrastive', dynamic_ncols=True)
+    pbar = make_progress_bar(epochs, len(train_loader), desc='Contrastive')
 
     for epoch in range(epochs):
         model.train()
@@ -288,29 +263,16 @@ def main():
 
         cur_lr = opt.param_groups[0]['lr']
         msg = f'epoch {epoch:4d}: lr={cur_lr:.2e} tr_loss={tr_loss:.4e} | val_loss={val_loss:.4e}'
-        if sch is not None:
-            sch.step(val_loss)
-        if val_loss < best_val:
-            best_val = val_loss
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.backbone.state_dict(),  # backbone-only
-                'val_loss': val_loss,
-                'config': cfg,
-            }, out_dir / 'best.pt')
-            msg += ' [BEST]'
-        tqdm.write(msg, file=sys.stdout)
-        log_lines.append(msg)
-        with open(log_path, 'w') as f:
-            f.write('\n'.join(log_lines) + '\n')
+        best_val, msg = scheduler_step_and_save_best(
+            val_loss, best_val, epoch, model.backbone,  # backbone-only state dict
+            cfg, out_dir, msg,
+            scheduler=sch, extra_ckpt={'val_loss': val_loss},
+        )
+        write_log_line(msg, log_lines, log_path)
 
     pbar.close()
     print(f'Done. Best val: {best_val:.4e}')
-    torch.save({
-        'epoch': epochs - 1,
-        'model_state_dict': model.backbone.state_dict(),
-        'config': cfg,
-    }, out_dir / 'final.pt')
+    save_final_checkpoint(out_dir, epochs, model.backbone, cfg)
 
 
 if __name__ == '__main__':

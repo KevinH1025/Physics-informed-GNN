@@ -24,7 +24,6 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import yaml
-from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,6 +31,11 @@ from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args
 from circuitgnn.training.config import parse_training_config
 from circuitgnn.training.losses import compute_kcl_loss
+from circuitgnn.training.pretrain import (
+    make_progress_bar,
+    prepare_out_dir,
+    write_log_line,
+)
 
 
 _LOG_FLOOR = 1e-12
@@ -440,10 +444,7 @@ def main():
         print(f'Plateau scheduler: patience={sch_patience} factor={sch_factor} min_lr={sch_min_lr}')
 
     out_dir = Path(f"{args.dataset_dir}/experiments/{args.name}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / 'original_config.yaml', 'w') as f:
-        yaml.safe_dump(cfg, f)
-    log_path = out_dir / 'training.log'
+    log_path = prepare_out_dir(out_dir, cfg)
     log_lines = []
     history: dict = {}  # epoch-indexed metric arrays for curve plotting
     best_val = float('inf')
@@ -451,7 +452,7 @@ def main():
     es_patience = int(cfg.get('training', {}).get('early_stopping_patience', 500))
     print(f'Early stopping patience: {es_patience} epochs')
 
-    pbar = tqdm(total=args.epochs * len(train_loader), desc='SupPretrain', dynamic_ncols=True)
+    pbar = make_progress_bar(args.epochs, len(train_loader), desc='SupPretrain')
 
     def attach_norm(b):
         attach_normalization_to_batch(
@@ -629,6 +630,13 @@ def main():
             )
         msg = (f'epoch {epoch:4d}: lr={cur_lr:.2e} tr={tr_total:.4e} | val={val_total:.4e} '
                f'[{parts_str}]{topo_str}')
+        # NOTE: epoch-end handling deliberately does NOT use the shared
+        # scheduler_step_and_save_best() skeleton from
+        # circuitgnn.training.pretrain because this script diverges: the
+        # best/scheduler metric is avg per-topo V MAE (not a val loss), the
+        # scheduler may be cosine (step() takes no metric), best_epoch is
+        # tracked for early stopping and the checkpoint schema adds
+        # val_loss_sched/avg_v_mae_mV/per_topo_v_mae/val_parts/norm_stats.
         # Best-model save and LR scheduler both use avg per-topo V MAE — directly
         # tracks the headline metric, immune to i_loss/KCL trade-off that fooled
         # val_sched into triggering ES too early.
@@ -673,20 +681,14 @@ def main():
         # Console + log file: only every 50 epochs OR when a new best was found.
         # No need to write the log file every epoch — once per 50 is enough.
         if epoch % 50 == 0 or epoch == args.epochs - 1 or '[BEST]' in msg:
-            tqdm.write(msg, file=sys.stdout)
-            log_lines.append(msg)
-            with open(log_path, 'w') as f:
-                f.write('\n'.join(log_lines) + '\n')
+            write_log_line(msg, log_lines, log_path)
             _save_curves(history, out_dir / 'training_curve.png')
 
         if (epoch - best_epoch) >= es_patience:
             stop_msg = (f'Early stopping at epoch {epoch}: no improvement '
                         f'for {es_patience} epochs (best at {best_epoch}, '
                         f'val={best_val:.4e})')
-            tqdm.write(stop_msg, file=sys.stdout)
-            log_lines.append(stop_msg)
-            with open(log_path, 'w') as f:
-                f.write('\n'.join(log_lines) + '\n')
+            write_log_line(stop_msg, log_lines, log_path)
             break
 
     pbar.close()

@@ -23,44 +23,6 @@ from ..components.current_from_voltage import (
 from ..components.current_gnn import CurrentGNNBackbone, propagate_voltages_to_terminals
 from .base import BaseGNN
 
-# Import for frozen device MLP (lazy to avoid circular imports if needed)
-def _load_frozen_device_mlp(config: dict):
-    """Load and freeze a pre-trained Device MLP."""
-    from circuitgnn.models.device_mlp import DeviceMLP
-    checkpoint_path = config.get('checkpoint')
-    if not checkpoint_path:
-        raise ValueError("frozen_device_mlp_config must specify 'checkpoint' path")
-
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    model_state = checkpoint.get('model_state_dict', checkpoint)
-    stats = checkpoint.get('stats', {})
-
-    # Get model config from checkpoint or config file
-    hidden_dim = config.get('hidden_dim', 128)
-    num_layers = config.get('num_layers', 3)
-    use_polynomial_features = config.get('use_polynomial_features', False)
-    use_separate_heads = config.get('use_separate_heads', False)
-    use_residual = config.get('use_residual', False)
-
-    # Create model with matching architecture
-    device_mlp = DeviceMLP(
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
-        dropout=0.0,
-        use_polynomial_features=use_polynomial_features,
-        use_separate_heads=use_separate_heads,
-        use_residual=use_residual,
-    )
-    device_mlp.load_state_dict(model_state)
-
-    # Freeze parameters
-    device_mlp.eval()
-    for param in device_mlp.parameters():
-        param.requires_grad = False
-
-    return device_mlp, stats
-
 
 @register_model("deepgen")
 class DeepGENConv(BaseGNN):
@@ -99,9 +61,9 @@ class DeepGENConv(BaseGNN):
         use_gnn_current_prediction: If True, use GNN layers for current prediction
             instead of MLP. Provides context-aware current prediction.
         current_gnn_config: Config dict for current GNN backbone (when using GNN)
-        use_frozen_device_mlp: If True, use pre-trained frozen Device MLP for MOSFET
-            current prediction. The MLP is frozen but gradients flow through it.
-        frozen_device_mlp_config: Config dict for frozen Device MLP (checkpoint path, etc.)
+        use_frozen_device_mlp: abandoned experiment, kept only so old configs and
+            checkpoints still construct. Raises if enabled.
+        frozen_device_mlp_config: unused, see above.
     """
 
     def __init__(
@@ -286,15 +248,12 @@ class DeepGENConv(BaseGNN):
                 self.current_gnn_backbone = None
                 self.frozen_device_mlp = None
             elif use_frozen_device_mlp:
-                # Pre-trained frozen Device MLP for physics-informed current prediction
-                # The MLP is frozen but gradients flow through it to voltage predictions
-                self.frozen_device_mlp, self.frozen_device_mlp_stats = _load_frozen_device_mlp(
-                    frozen_device_mlp_config
+                raise NotImplementedError(
+                    "use_frozen_device_mlp was an abandoned experiment. Its current "
+                    "derivation referenced an undefined name, so it raised at the "
+                    "first forward pass and no shipped config ever enabled it. The "
+                    "dead implementation was removed for the public release."
                 )
-                self.current_head = None
-                self.mosfet_current_mlp = None
-                self.current_gnn_backbone = None
-                self.device_current_head = None
             elif use_device_pooling_current:
                 # Device-level pooling: predict one current per device from terminal embeddings
                 from circuitgnn.gnn.components.device_current_head import DevicePoolingCurrentHead
@@ -984,106 +943,6 @@ class DeepGENConv(BaseGNN):
                 result['node_currents'] = combined_currents
                 result['voltage_derived_current_mask'] = voltage_derived_mask
 
-            elif self.use_frozen_device_mlp:
-                # Pre-trained frozen Device MLP for physics-informed current prediction
-                # The MLP is frozen but gradients flow through it to voltage predictions
-                # This teaches the GNN: "wrong voltages → wrong currents"
-
-                pred_voltages = result['node_voltages']
-                # NO detach - gradients flow through frozen MLP to voltage predictions
-                num_nodes = len(pred_voltages)
-                device = pred_voltages.device
-                dtype = pred_voltages.dtype
-                ptr = getattr(data, 'ptr', None)
-
-                # Get normalization stats
-                voltage_mean = getattr(data, 'voltage_mean', 0.0)
-                voltage_std = getattr(data, 'voltage_std', 1.0)
-                current_mean = getattr(data, 'current_mean', 0.0)
-                current_std = getattr(data, 'current_std', 1.0)
-
-                # Get Device MLP training stats for proper denormalization
-                mlp_stats = getattr(self, 'frozen_device_mlp_stats', {})
-                mlp_Vgs_mean = mlp_stats.get('Vgs_mean', 0.0)
-                mlp_Vgs_std = mlp_stats.get('Vgs_std', 1.0)
-                mlp_Vds_mean = mlp_stats.get('Vds_mean', 0.0)
-                mlp_Vds_std = mlp_stats.get('Vds_std', 1.0)
-                mlp_log_W_mean = mlp_stats.get('log_W_mean', -5.0)
-                mlp_log_W_std = mlp_stats.get('log_W_std', 0.5)
-                mlp_log_L_mean = mlp_stats.get('log_L_mean', -7.0)
-                mlp_log_L_std = mlp_stats.get('log_L_std', 0.3)
-                mlp_log_I_mean = mlp_stats.get('log_I_mean', -5.0)
-                mlp_log_I_std = mlp_stats.get('log_I_std', 1.0)
-
-                # Initialize combined currents
-                combined_currents = torch.zeros(num_nodes, device=device, dtype=dtype)
-                voltage_derived_mask = torch.zeros(num_nodes, device=device, dtype=torch.bool)
-
-                # 1. MOSFET currents via frozen Device MLP
-                mosfet_info = getattr(data, 'mosfet_info', None)
-                num_terminals = getattr(data, 'num_terminals', None)
-                if mosfet_info is not None and num_terminals is not None and len(mosfet_info) > 0:
-                    mosfet_currents = self._compute_mosfet_currents_frozen_device_mlp(
-                        pred_voltages=pred_voltages,
-                        mosfet_info=mosfet_info,
-                        terminal_features=data.x,
-                        ptr=ptr,
-                        num_nodes=num_nodes,
-                        voltage_mean=voltage_mean,
-                        voltage_std=voltage_std,
-                        current_mean=current_mean,
-                        current_std=current_std,
-                        mlp_stats=mlp_stats,
-                    )
-                    if mosfet_currents is not None:
-                        combined_currents = combined_currents + mosfet_currents
-                        voltage_derived_mask = voltage_derived_mask | (mosfet_currents != 0)
-
-                # 2. Resistor currents via Ohm's law
-                resistor_info = getattr(data, 'resistor_info', None)
-                if resistor_info is not None and len(resistor_info) > 0:
-                    resistor_currents = compute_resistor_currents(
-                        pred_voltages=pred_voltages,
-                        resistor_info=resistor_info,
-                        num_nodes=num_nodes,
-                        ptr=ptr,
-                        voltage_mean=voltage_mean,
-                        voltage_std=voltage_std,
-                        current_mean=current_mean,
-                        current_std=current_std,
-                        resistor_ptr=getattr(data, 'resistor_ptr', None),
-                    )
-                    combined_currents = combined_currents + resistor_currents
-                    voltage_derived_mask = voltage_derived_mask | (resistor_currents != 0)
-
-                # 3. Capacitor currents (zeros for DC analysis)
-                capacitor_info = getattr(data, 'capacitor_info', None)
-                if capacitor_info is not None and len(capacitor_info) > 0:
-                    capacitor_currents = compute_capacitor_currents(
-                        capacitor_info=capacitor_info,
-                        num_nodes=num_nodes,
-                        device=device,
-                        dtype=dtype,
-                    )
-                    combined_currents = combined_currents + capacitor_currents
-
-                # 4. I-source currents (known constants)
-                isource_info = getattr(data, 'isource_info', None)
-                if isource_info is not None and len(isource_info) > 0:
-                    isource_currents = compute_isource_currents(
-                        isource_info=isource_info,
-                        num_nodes=num_nodes,
-                        ptr=ptr,
-                        current_mean=current_mean,
-                        current_std=current_std,
-                        isource_ptr=getattr(data, 'isource_ptr', None),
-                    )
-                    combined_currents = combined_currents + isource_currents
-                    voltage_derived_mask = voltage_derived_mask | (isource_currents != 0)
-
-                result['node_currents'] = combined_currents
-                result['voltage_derived_current_mask'] = voltage_derived_mask
-
             elif self.use_device_pooling_current:
                 # Device-level pooling: one current per device
                 node_currents, device_mask, _ = self.device_current_head(
@@ -1189,139 +1048,3 @@ class DeepGENConv(BaseGNN):
 
         return x
 
-    def _compute_mosfet_currents_frozen_device_mlp(
-        self,
-        pred_voltages: torch.Tensor,
-        mosfet_info: torch.Tensor,
-        terminal_features: torch.Tensor,
-        ptr: Optional[torch.Tensor],
-        num_nodes: int,
-        voltage_mean: float,
-        voltage_std: float,
-        current_mean: float,
-        current_std: float,
-        mlp_stats: dict,
-    ) -> torch.Tensor:
-        """
-        Compute MOSFET currents using frozen Device MLP.
-
-        The frozen Device MLP was pre-trained on SPICE data to learn I_ds = f(Vgs, Vds, W, L, is_nmos).
-        Gradients flow through the frozen MLP to voltage predictions, providing physics-informed
-        gradient signal to the voltage backbone.
-
-        Args:
-            pred_voltages: Predicted voltages (normalized z-score) [num_nodes]
-            mosfet_info: MOSFET info [num_mosfets, 7] with columns:
-                [gate_term, drain_term, source_term, gate_net, drain_net, source_net, is_nmos]
-            terminal_features: Node features [num_nodes, feature_dim]
-            ptr: Node boundaries per graph [batch_size + 1] or None for single graph
-            num_nodes: Total number of nodes
-            voltage_mean: Mean for voltage denormalization
-            voltage_std: Std for voltage denormalization
-            current_mean: Mean for current normalization (log10 scale)
-            current_std: Std for current normalization (log10 scale)
-            mlp_stats: Normalization stats from Device MLP training
-
-        Returns:
-            MOSFET currents (normalized z-score) [num_nodes] with non-zero values at drain terminals
-        """
-        device = pred_voltages.device
-        dtype = pred_voltages.dtype
-        num_mosfets = len(mosfet_info)
-
-        # Handle batching: add node offsets to indices
-        if ptr is not None and len(ptr) > 2:
-            # Batched data - need to add offsets
-            num_graphs = len(ptr) - 1
-            mosfet_ptr = getattr(data, 'mosfet_ptr', None) if hasattr(data, 'mosfet_ptr') else None
-
-            # Compute graph assignment for each MOSFET
-            if mosfet_ptr is not None:
-                mosfet_graph_idx = torch.bucketize(
-                    torch.arange(num_mosfets, device=device),
-                    mosfet_ptr[1:].to(device), right=True)
-            else:
-                mosfets_per_graph = num_mosfets // num_graphs
-                mosfet_graph_idx = torch.arange(num_mosfets, device=device) // mosfets_per_graph
-
-            node_offsets = ptr[mosfet_graph_idx]
-
-            # Build offset-adjusted indices
-            gate_net_idx = mosfet_info[:, 3] + node_offsets
-            drain_net_idx = mosfet_info[:, 4] + node_offsets
-            source_net_idx = mosfet_info[:, 5] + node_offsets
-            drain_term_idx = mosfet_info[:, 1] + node_offsets
-        else:
-            gate_net_idx = mosfet_info[:, 3]
-            drain_net_idx = mosfet_info[:, 4]
-            source_net_idx = mosfet_info[:, 5]
-            drain_term_idx = mosfet_info[:, 1]
-
-        is_nmos = mosfet_info[:, 6].float().to(device)
-
-        # Gather voltages at gate, drain, source nets
-        V_g_norm = pred_voltages[gate_net_idx]
-        V_d_norm = pred_voltages[drain_net_idx]
-        V_s_norm = pred_voltages[source_net_idx]
-
-        # Denormalize voltages to actual volts
-        V_g = V_g_norm * voltage_std + voltage_mean
-        V_d = V_d_norm * voltage_std + voltage_mean
-        V_s = V_s_norm * voltage_std + voltage_mean
-
-        # Compute Vgs and Vds in actual volts
-        Vgs = V_g - V_s
-        Vds = V_d - V_s
-
-        # Get W, L from terminal features
-        # Features are stored at drain terminal, typically as normalized log values
-        # Feature indices: 0=W, 1=L, 2=W/L (normalized)
-        wl_feat = terminal_features[drain_term_idx, 2]  # W/L ratio (normalized)
-
-        # Denormalize W/L: W/L = 10^(wl_norm * 3.0) based on graph_builder normalization
-        wl_ratio = torch.pow(10, 3.0 * wl_feat)
-
-        # Get individual W and L from features if available, otherwise derive from W/L
-        # Assuming typical L range around 100nm-1um, use W/L and a reference L
-        w_feat = terminal_features[drain_term_idx, 0]  # Normalized W
-        l_feat = terminal_features[drain_term_idx, 1]  # Normalized L
-
-        # The normalization in graph_builder uses min-max for W, L
-        # For Device MLP we need log10(W) and log10(L) in meters
-        # Approximate using typical ranges: W: 0.1um-100um, L: 0.05um-1um
-        # log10(W) range: ~[-7, -4], log10(L) range: ~[-7.3, -6]
-        log_W = w_feat * 3.0 - 7.0  # Approximate mapping: normalized [0,1] -> log10 [-7, -4]
-        log_L = l_feat * 1.3 - 7.3  # Approximate mapping: normalized [0,1] -> log10 [-7.3, -6]
-
-        # Normalize inputs for Device MLP using its training stats
-        mlp_Vgs_mean = mlp_stats.get('Vgs_mean', 0.0)
-        mlp_Vgs_std = mlp_stats.get('Vgs_std', 1.0)
-        mlp_Vds_mean = mlp_stats.get('Vds_mean', 0.0)
-        mlp_Vds_std = mlp_stats.get('Vds_std', 1.0)
-        mlp_log_W_mean = mlp_stats.get('log_W_mean', -5.5)
-        mlp_log_W_std = mlp_stats.get('log_W_std', 0.8)
-        mlp_log_L_mean = mlp_stats.get('log_L_mean', -6.8)
-        mlp_log_L_std = mlp_stats.get('log_L_std', 0.3)
-        mlp_log_I_mean = mlp_stats.get('log_I_mean', -5.0)
-        mlp_log_I_std = mlp_stats.get('log_I_std', 1.0)
-
-        Vgs_norm = (Vgs - mlp_Vgs_mean) / mlp_Vgs_std
-        Vds_norm = (Vds - mlp_Vds_mean) / mlp_Vds_std
-        log_W_norm = (log_W - mlp_log_W_mean) / mlp_log_W_std
-        log_L_norm = (log_L - mlp_log_L_mean) / mlp_log_L_std
-
-        # Forward through frozen Device MLP
-        # Output is normalized log10(I_ds)
-        log_I_ds_norm = self.frozen_device_mlp(Vgs_norm, Vds_norm, log_W_norm, log_L_norm, is_nmos)
-
-        # Denormalize to actual log10(I_ds)
-        log_I_ds = log_I_ds_norm * mlp_log_I_std + mlp_log_I_mean
-
-        # Normalize to GNN current target format (z-score of log10)
-        I_ds_gnn_norm = (log_I_ds - current_mean) / current_std
-
-        # Scatter currents to drain terminal positions
-        currents = torch.zeros(num_nodes, device=device, dtype=dtype)
-        currents.scatter_(0, drain_term_idx.to(device), I_ds_gnn_norm)
-
-        return currents

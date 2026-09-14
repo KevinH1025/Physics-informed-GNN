@@ -118,6 +118,57 @@ where $A_1$ and $A_2$ are the first and second stage gains and $R_{out3}$ is the
 
 Ablations behind every choice above (message-passing operator, attention components, depth, head design) are reproducible from the configs under `configs/gnn/tower/`.
 
+## Training objective
+
+The model predicts all quantities at once. The total loss is one supervised term per quantity plus the KCL constraint, whose weight changes over training:
+
+$$
+\mathcal{L}_{\text{total}}(\theta; t) = \mathcal{L}_V + \mathcal{L}_I + \mathcal{L}_{g_m} + \mathcal{L}_{g_{ds}} + \mathcal{L}_{DC} + w_{\text{KCL}}(t)\,\mathcal{L}_{\text{KCL}}
+$$
+
+All five supervised terms have equal weight and are active from the first epoch.
+
+**Normalization.** The targets span very different ranges, so each is standardized with training-set statistics and the model predicts in that normalized space. Currents and small-signal parameters cover many decades, so they are standardized on a log scale, with a one-picoampere floor inside the logarithm so near-zero currents stay finite:
+
+$$
+z^V_n = \frac{V_n - \mu_V}{\sigma_V}, \qquad
+z^I_t = \frac{\log_{10}\left(|I_t| + 10^{-12}\right) - \mu_I}{\sigma_I}, \qquad
+z^{g_m}_m = \frac{\log_{10} g_{m,m} - \mu_{g_m}}{\sigma_{g_m}}
+$$
+
+The output conductance is standardized the same way as gm and the DC gain is standardized in decibels.
+
+**Supervised terms.** Each is a mean squared error in normalized space. They differ only in which positions they average over:
+
+| Term | Averaged over |
+|------|---------------|
+| $\mathcal{L}_V$ | internal nets (supply rails and inputs have known voltages) |
+| $\mathcal{L}_I$ | terminals that carry DC current: transistor drains and sources plus resistor terminals |
+| $\mathcal{L}_{g_m}$ and $\mathcal{L}_{g_{ds}}$ | transistors, one value each |
+| $\mathcal{L}_{DC}$ | circuits whose simulation converged to a positive gain |
+
+**KCL constraint.** At every internal net $n$ the currents must balance. Each terminal enters with a sign, $+1$ for current flowing into the net and $-1$ for current flowing out:
+
+$$
+\sum_{t \in \text{terms}(n)} \text{sign}(t)\,|I_t| = 0
+$$
+
+Transistor drain and source signs are fixed by the device type. Every other device follows the simulated current direction, which lets the constraint handle a feedback resistor whose current reverses. Because the model predicts log-magnitudes, the residual is formed in log space. The inflowing and outflowing magnitudes are each combined with a log-sum-exp into $S^+_n$ and $S^-_n$ and the loss penalizes the gap between them:
+
+$$
+\mathcal{L}_{\text{KCL}} = \frac{1}{|\mathcal{N}_{\text{KCL}}|} \sum_{n \in \mathcal{N}_{\text{KCL}}} \left(S^+_n - S^-_n\right)^2
+$$
+
+The covered nets $\mathcal{N}_{\text{KCL}}$ leave out supply rails and inputs, nets where every terminal flows the same way so no balance is possible and nets carrying less than a nanoampere in total, where simulator noise dominates.
+
+**Schedule.** Penalizing conservation before the individual currents are roughly right only adds gradient noise, so the constraint is phased in linearly:
+
+$$
+w_{\text{KCL}}(t) = \min\left(1,\ \max\left(0,\ \frac{t - t_0}{T_r}\right)\right), \qquad t_0 = 200,\quad T_r = 100
+$$
+
+Loop attention is phased in the same way, inactive for the first 350 epochs and then ramped in over 400. Training uses Adam at a learning rate of $3 \times 10^{-3}$ with a 50-epoch warm-up, halves the rate after 150 epochs without improvement, clips gradients at a norm of 0.3, uses batches of 1,024 circuit graphs and stops early after 500 epochs without improvement.
+
 ## Repository layout
 
 ```

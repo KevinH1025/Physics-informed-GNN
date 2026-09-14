@@ -2,13 +2,255 @@
 Checkpoint save/load utilities for GNN models.
 
 Handles saving complete configs and loading models with architecture auto-detection.
+
+The full model-parameter set is defined ONCE in the MODEL_KWARGS table below.
+create_model, create_model_from_args, load_checkpoint and build_full_config all
+derive their kwarg enumerations from that table, so the four cannot drift apart.
+The historical gaps between the four enumerations (kwargs that were never saved
+by build_full_config or never read back by load_checkpoint) are preserved as-is
+and encoded explicitly per entry via ``ckpt=None`` / ``save=None``.
 """
 
+import inspect
 from pathlib import Path
 import torch
 import yaml
 
 from circuitgnn.gnn import get_model, list_models
+
+
+def _from_config(keys, default):
+    """
+    Checkpoint-config resolver: chained flat-config lookup.
+
+    _from_config(('a', 'b'), d) resolves exactly like the original
+    ``config.get('a', config.get('b', d))``. Dict defaults are copied per call
+    so resolved configs never share one mutable empty dict.
+    """
+    def resolve(config, state_dict):
+        value = dict(default) if isinstance(default, dict) else default
+        for key in reversed(keys):
+            value = config.get(key, value)
+        return value
+    return resolve
+
+
+def _kw(name, default, is_config=False, args_attr=None, args_required=False,
+        ckpt=None, save=None):
+    """
+    Build one MODEL_KWARGS entry.
+
+    Args:
+        name: create_model kwarg name (also the model kwarg passed to get_model)
+        default: create_model signature default
+        is_config: config-dict kwarg; create_model applies ``value or {}`` and
+            create_model_from_args / build_full_config fall back to ``{}``
+        args_attr: attribute read off the flat args namespace (default: name).
+            Differs only for hidden_dim -> hidden, num_layers -> layers,
+            use_virtual_node -> virtual_node.
+        args_required: read via plain attribute access (AttributeError if the
+            args namespace lacks it), matching the original direct ``args.x``
+        ckpt: how load_checkpoint resolves this kwarg from a saved checkpoint:
+            None       -> never read back; the table default is used (this is
+                          the historical load_checkpoint lossiness, kept as-is)
+            True       -> config.get(name, default) with the standard default
+            tuple      -> chained config.get over the given flat-key aliases
+            callable   -> resolver(config, state_dict), used for the
+                          state-dict-substring auto-detection quirks
+        save: how build_full_config persists this kwarg into the flat config:
+            None             -> never persisted (historical gap, kept as-is)
+            'args'           -> read off args (same access as
+                                create_model_from_args) under key args_attr
+            'param'          -> taken verbatim from build_full_config's own
+                                parameter of the same name
+            'param_or_empty' -> same, with ``or {}`` applied
+    """
+    if ckpt is True:
+        ckpt = _from_config((name,), {} if is_config else default)
+    elif isinstance(ckpt, tuple):
+        ckpt = _from_config(ckpt, {} if is_config else default)
+    return {
+        'name': name,
+        'default': default,
+        'is_config': is_config,
+        'args_attr': args_attr if args_attr is not None else name,
+        'args_required': args_required,
+        'ckpt': ckpt,
+        'save': save,
+    }
+
+
+# Single source of truth for the model-parameter set. Order matters: it is the
+# create_model signature order, which is also the order of the kwargs dict
+# passed to get_model (kept identical to the original hand-written code).
+MODEL_KWARGS = [
+    _kw('hidden_dim', 128, args_attr='hidden', args_required=True,
+        ckpt=('hidden', 'hidden_dim'), save='args'),
+    _kw('num_layers', 15, args_attr='layers', args_required=True,
+        ckpt=('layers', 'num_layers'), save='args'),
+    _kw('dropout', 0.0, args_required=True, ckpt=True, save='args'),
+    _kw('genconv_num_layers', 2, ckpt=True, save='args'),
+    # conv_type/conv_num_heads/mlp_expansion/mlp_depth are neither saved nor
+    # loaded: a GATv2/GIN checkpoint is only reconstructible via the
+    # YAML-reparse path (parse_training_config + create_model_from_args).
+    _kw('conv_type', 'genconv'),
+    _kw('conv_num_heads', 4),
+    _kw('mlp_expansion', 2),
+    _kw('mlp_depth', 2),
+    _kw('num_mlp_layers', 3, ckpt=True, save='args'),
+    _kw('jk_mode', 'cat', args_required=True, ckpt=True, save='args'),
+    _kw('jk_attention', False, args_required=True, ckpt=True, save='args'),
+    _kw('jk_learn_temperature', False, ckpt=True, save='args'),
+    _kw('norm_type', 'layer', ckpt=True, save='args'),
+    _kw('act_type', 'relu',
+        # Auto-detect GELU from state_dict keys (quirk kept as-is: nn.GELU is
+        # parameter-free so no 'gelu' key ever exists and this cannot fire)
+        ckpt=lambda config, state_dict: config.get(
+            'act_type',
+            'gelu' if any('gelu' in k.lower() for k in state_dict.keys()) else 'relu'),
+        save='args'),
+    _kw('skip_connection', True, ckpt=True, save='args'),
+    _kw('predict_currents', False, ckpt=True, save='param'),
+    _kw('voltage_head_config', None, is_config=True,
+        ckpt=('voltage_head_config', 'voltage_head'), save='param'),
+    _kw('current_head_config', None, is_config=True,
+        ckpt=('current_head_config', 'current_head'), save='param'),
+    # Virtual node options (model handles these internally)
+    _kw('use_virtual_node', False, args_attr='virtual_node', args_required=True,
+        # Detect virtual node from state_dict keys (backward compatibility with
+        # old checkpoints that used the separate deepgen_vn model)
+        ckpt=lambda config, state_dict: config.get(
+            'virtual_node', config.get(
+                'use_virtual_node',
+                any('vn_' in k or 'virtual_node' in k for k in state_dict.keys()))),
+        save='args'),
+    _kw('use_attention_pooling', True, ckpt=True, save='args'),
+    _kw('vn_learn_temperature', False, ckpt=True, save='args'),
+    # vn_gate_broadcast/vn_mode/vn_num_heads/vn_head_dim are never persisted as
+    # flat keys; load_checkpoint reads them from a nested 'vn_config' that the
+    # training entry points never populate, so on load they resolve via the
+    # state-dict sniffs below (num_heads/head_dim: always the defaults).
+    _kw('vn_gate_broadcast', False,
+        ckpt=lambda config, state_dict: config.get('vn_config', {}).get(
+            'gate_broadcast',
+            any('virtual_node.gate_projs' in k for k in state_dict.keys()))),
+    _kw('vn_mode', 'default',
+        ckpt=lambda config, state_dict: config.get('vn_config', {}).get(
+            'mode',
+            'mha' if any('virtual_node.W_q' in k for k in state_dict.keys()) else 'default')),
+    _kw('vn_num_heads', 4,
+        ckpt=lambda config, state_dict: config.get('vn_config', {}).get('num_heads', 4)),
+    _kw('vn_head_dim', 32,
+        ckpt=lambda config, state_dict: config.get('vn_config', {}).get('head_dim', 32)),
+    _kw('vn_apply_to', 'backbone'),
+    _kw('gradient_checkpointing', False,
+        ckpt=lambda config, state_dict: False,  # Not needed for inference
+        save='args'),
+    # Voltage-derived current options
+    _kw('derive_currents_from_voltage', False, ckpt=True, save='param'),
+    _kw('mosfet_current_mlp_config', None, is_config=True, ckpt=True,
+        save='param_or_empty'),
+    # GNN-based current prediction options
+    _kw('use_gnn_current_prediction', False, ckpt=True, save='param'),
+    _kw('current_gnn_config', None, is_config=True, ckpt=True,
+        save='param_or_empty'),
+    # Frozen Device MLP options
+    _kw('use_frozen_device_mlp', False, ckpt=True, save='param'),
+    _kw('frozen_device_mlp_config', None, is_config=True, ckpt=True,
+        save='param_or_empty'),
+    # Device-level pooling current head
+    _kw('use_device_pooling_current', False,
+        ckpt=lambda config, state_dict: config.get(
+            'use_device_pooling_current',
+            any('device_current_head.' in k for k in state_dict.keys())),
+        save='args'),
+    # Device aggregation layer (auto-detected on load, never persisted)
+    _kw('device_aggregation_config', None, is_config=True,
+        ckpt=lambda config, state_dict: config.get(
+            'device_aggregation_config',
+            {'enabled': True} if any('device_agg.' in k for k in state_dict.keys()) else {})),
+    # Intermediate voltage prediction
+    _kw('intermediate_voltage_config', None, is_config=True),
+    # Edge features
+    _kw('use_edge_features', False),
+    _kw('edge_feature_dim', 6),
+    _kw('edge_feature_indices', None),
+    _kw('input_dropout', 0.0),
+    # Refinement pass options
+    _kw('use_refinement_pass', False, ckpt=True, save='param'),
+    _kw('refinement_config', None, is_config=True, ckpt=True,
+        save='param_or_empty'),
+    # AC readout head
+    _kw('ac_head_config', None, is_config=True, ckpt=True, save='args'),
+    # gm/gds prediction head
+    _kw('ss_head_config', None, is_config=True, ckpt=True, save='args'),
+    # Region classification head
+    _kw('region_head_config', None, is_config=True, ckpt=True, save='args'),
+    # Z-space KCL projection
+    _kw('kcl_zspace_projection', False),
+    _kw('kcl_blend_alpha', 0.0),
+    # Tower architecture options
+    _kw('backbone_layers', 6, ckpt=True, save='args'),
+    _kw('state_tower_layers', 2, ckpt=True, save='args'),
+    _kw('sensitivity_tower_layers', 2, ckpt=True, save='args'),
+    _kw('backbone_jk_config', None, is_config=True, ckpt=True, save='args'),
+    _kw('state_tower_jk_config', None, is_config=True, ckpt=True, save='args'),
+    _kw('sensitivity_tower_jk_config', None, is_config=True, ckpt=True,
+        save='args'),
+    # Vov prediction head (read on load but never persisted -> always {})
+    _kw('vov_head_config', None, is_config=True, ckpt=True),
+    # Vth prediction head (read on load but never persisted -> always {})
+    _kw('vth_head_config', None, is_config=True, ckpt=True),
+    # Loop attention config (auto-detected fallback hardcodes 4 heads / dim 32
+    # / backbone / gate fusion, as before)
+    _kw('loop_attention_config', None, is_config=True,
+        ckpt=lambda config, state_dict: config.get(
+            'loop_attention_config',
+            {'enabled': True, 'num_heads': 4, 'head_dim': 32,
+             'apply_to': 'backbone', 'fusion': 'gate'}
+            if any('loop_attn' in k for k in state_dict.keys()) else {}),
+        save='args'),
+    # DC gain prediction head
+    _kw('dc_gain_config', None, is_config=True, ckpt=True, save='args'),
+    # gm/Id auxiliary head
+    _kw('gm_id_head_config', None, is_config=True,
+        ckpt=lambda config, state_dict: config.get(
+            'gm_id_head_config',
+            {'enabled': True} if any('gm_id_head.' in k for k in state_dict.keys()) else {}),
+        save='args'),
+    # Subcircuit DAG
+    _kw('subcircuit_dag_config', None, is_config=True),
+    # Vgs/Vds prediction head
+    _kw('vgsvds_config', None, is_config=True),
+    # Pretrained IV-surface autoencoder embedding as MOSFET input feature
+    _kw('iv_embedder_config', None, is_config=True),
+    # Physics-exact currents from LUT lookup on predicted V
+    _kw('lut_current_config', None, is_config=True),
+    # Iterative-refinement per-node LUT op-point features
+    _kw('lut_op_features_config', None, is_config=True),
+    # Stacking: forward baseline predictions as extra inputs
+    _kw('stack_features_config', None, is_config=True),
+    # End-to-end LUT-residual (heads predict deltas, LUT is physics layer)
+    _kw('lut_residual_config', None, is_config=True),
+    # 5-dim per-MOSFET physical descriptor (LUT lookups at canonical biases)
+    _kw('mosfet_descriptor_config', None, is_config=True),
+    # 7-dim per-MOSFET functional role one-hot
+    _kw('mosfet_role_config', None, is_config=True),
+    # 5-dim per-net role one-hot (VDD/GND/SIG_IN/SIG_OUT/INTERNAL)
+    _kw('net_role_config', None, is_config=True),
+]
+
+
+def _args_value(args, spec):
+    """
+    Read one model kwarg off the flat args namespace, exactly as the original
+    create_model_from_args / build_full_config did: required entries via plain
+    attribute access, the rest via getattr with the standard default ({} for
+    config-dict entries, the signature default otherwise).
+    """
+    if spec['args_required']:
+        return getattr(args, spec['args_attr'])
+    return getattr(args, spec['args_attr'], {} if spec['is_config'] else spec['default'])
 
 
 def create_model(
@@ -88,6 +330,10 @@ def create_model(
     """
     Create a GNN model with the specified configuration.
 
+    The signature is kept explicit for API compatibility; its parameter names,
+    order and defaults are verified against MODEL_KWARGS at import time (see
+    _assert_table_matches_signature), so the two cannot drift apart.
+
     Args:
         node_feature_dim: Input feature dimension
         hidden_dim: Hidden layer dimension
@@ -127,107 +373,14 @@ def create_model(
     if model_type is None:
         model_type = 'deepgen'
 
-    # All kwargs passed to model - VN is handled internally
-    model_kwargs = dict(
-        node_feature_dim=node_feature_dim,
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
-        dropout=dropout,
-        genconv_num_layers=genconv_num_layers,
-        conv_type=conv_type,
-        conv_num_heads=conv_num_heads,
-        mlp_expansion=mlp_expansion,
-        mlp_depth=mlp_depth,
-        num_mlp_layers=num_mlp_layers,
-        jk_mode=jk_mode,
-        jk_attention=jk_attention,
-        jk_learn_temperature=jk_learn_temperature,
-        norm_type=norm_type,
-        act_type=act_type,
-        skip_connection=skip_connection,
-        predict_currents=predict_currents,
-        voltage_head_config=voltage_head_config or {},
-        current_head_config=current_head_config or {},
-        # Virtual node options (model handles these internally)
-        use_virtual_node=use_virtual_node,
-        use_attention_pooling=use_attention_pooling,
-        vn_learn_temperature=vn_learn_temperature,
-        vn_gate_broadcast=vn_gate_broadcast,
-        vn_mode=vn_mode,
-        vn_num_heads=vn_num_heads,
-        vn_head_dim=vn_head_dim,
-        vn_apply_to=vn_apply_to,
-        gradient_checkpointing=gradient_checkpointing,
-        # Voltage-derived current options
-        derive_currents_from_voltage=derive_currents_from_voltage,
-        mosfet_current_mlp_config=mosfet_current_mlp_config or {},
-        # GNN-based current prediction options
-        use_gnn_current_prediction=use_gnn_current_prediction,
-        current_gnn_config=current_gnn_config or {},
-        # Frozen Device MLP options
-        use_frozen_device_mlp=use_frozen_device_mlp,
-        frozen_device_mlp_config=frozen_device_mlp_config or {},
-        # Device-level pooling current head
-        use_device_pooling_current=use_device_pooling_current,
-        # Device aggregation layer
-        device_aggregation_config=device_aggregation_config or {},
-        # Intermediate voltage prediction
-        intermediate_voltage_config=intermediate_voltage_config or {},
-        # Edge features
-        use_edge_features=use_edge_features,
-        edge_feature_dim=edge_feature_dim,
-        edge_feature_indices=edge_feature_indices,
-        input_dropout=input_dropout,
-        # Refinement pass options
-        use_refinement_pass=use_refinement_pass,
-        refinement_config=refinement_config or {},
-        # AC readout head
-        ac_head_config=ac_head_config or {},
-        # gm/gds prediction head
-        ss_head_config=ss_head_config or {},
-        # Region classification head
-        region_head_config=region_head_config or {},
-        # Z-space KCL projection
-        kcl_zspace_projection=kcl_zspace_projection,
-        kcl_blend_alpha=kcl_blend_alpha,
-        # Tower architecture options
-        backbone_layers=backbone_layers,
-        state_tower_layers=state_tower_layers,
-        sensitivity_tower_layers=sensitivity_tower_layers,
-        backbone_jk_config=backbone_jk_config or {},
-        state_tower_jk_config=state_tower_jk_config or {},
-        sensitivity_tower_jk_config=sensitivity_tower_jk_config or {},
-        # Vov prediction head
-        vov_head_config=vov_head_config or {},
-        # Vth prediction head
-        vth_head_config=vth_head_config or {},
-        # Loop attention config
-        loop_attention_config=loop_attention_config or {},
-        # DC gain prediction head
-        dc_gain_config=dc_gain_config or {},
-        # gm/Id auxiliary head
-        gm_id_head_config=gm_id_head_config or {},
-        # Subcircuit DAG
-        subcircuit_dag_config=subcircuit_dag_config or {},
-        # Vgs/Vds prediction head
-        vgsvds_config=vgsvds_config or {},
-        # Pretrained IV-surface autoencoder embedding as MOSFET input feature
-        iv_embedder_config=iv_embedder_config or {},
-        # Physics-exact currents from LUT lookup on predicted V
-        lut_current_config=lut_current_config or {},
-        # Iterative-refinement per-node LUT op-point features
-        lut_op_features_config=lut_op_features_config or {},
-        # Stacking: forward baseline predictions as extra inputs
-        stack_features_config=stack_features_config or {},
-        # End-to-end LUT-residual (heads predict deltas, LUT is physics layer)
-        lut_residual_config=lut_residual_config or {},
-        # 5-dim per-MOSFET physical descriptor (LUT lookups at canonical biases)
-        mosfet_descriptor_config=mosfet_descriptor_config or {},
-        # 7-dim per-MOSFET functional role one-hot
-        mosfet_role_config=mosfet_role_config or {},
-        # 5-dim per-net role one-hot (VDD/GND/SIG_IN/SIG_OUT/INTERNAL)
-        net_role_config=net_role_config or {},
-    )
+    # All kwargs passed to model - VN is handled internally. Derived from the
+    # MODEL_KWARGS table in table order (= original hand-written dict order);
+    # config-dict entries get the original ``value or {}`` normalization.
+    values = locals()
+    model_kwargs = {'node_feature_dim': node_feature_dim}
+    for spec in MODEL_KWARGS:
+        value = values[spec['name']]
+        model_kwargs[spec['name']] = (value or {}) if spec['is_config'] else value
 
     # Create model using registry
     model = get_model(model_type, **model_kwargs)
@@ -235,6 +388,25 @@ def create_model(
 
     model = model.to(device)
     return model, model_class
+
+
+def _assert_table_matches_signature():
+    """Fail loudly at import time if MODEL_KWARGS and create_model drift."""
+    non_table = ('node_feature_dim', 'device', 'model_type')
+    signature_items = [
+        (name, param.default)
+        for name, param in inspect.signature(create_model).parameters.items()
+        if name not in non_table
+    ]
+    table_items = [(spec['name'], spec['default']) for spec in MODEL_KWARGS]
+    if signature_items != table_items:
+        raise RuntimeError(
+            'MODEL_KWARGS is out of sync with the create_model signature; '
+            'update both together. signature=%r table=%r'
+            % (signature_items, table_items))
+
+
+_assert_table_matches_signature()
 
 
 def create_model_from_args(args, input_dim, device='cuda'):
@@ -253,79 +425,46 @@ def create_model_from_args(args, input_dim, device='cuda'):
     # Get model_type from args (default: 'deepgen')
     model_type = getattr(args, 'model_type', 'deepgen')
 
+    kwargs = {spec['name']: _args_value(args, spec) for spec in MODEL_KWARGS}
     return create_model(
         node_feature_dim=input_dim,
-        hidden_dim=args.hidden,
-        num_layers=args.layers,
-        dropout=args.dropout,
-        genconv_num_layers=getattr(args, 'genconv_num_layers', 2),
-        conv_type=getattr(args, 'conv_type', 'genconv'),
-        conv_num_heads=getattr(args, 'conv_num_heads', 4),
-        mlp_expansion=getattr(args, 'mlp_expansion', 2),
-        mlp_depth=getattr(args, 'mlp_depth', 2),
-        num_mlp_layers=getattr(args, 'num_mlp_layers', 3),
-        jk_mode=args.jk_mode,
-        jk_attention=args.jk_attention,
-        jk_learn_temperature=getattr(args, 'jk_learn_temperature', False),
-        norm_type=getattr(args, 'norm_type', 'layer'),
-        act_type=getattr(args, 'act_type', 'relu'),
-        skip_connection=getattr(args, 'skip_connection', True),
-        predict_currents=getattr(args, 'predict_currents', False),
-        voltage_head_config=getattr(args, 'voltage_head_config', {}),
-        current_head_config=getattr(args, 'current_head_config', {}),
-        use_virtual_node=args.virtual_node,
-        use_attention_pooling=getattr(args, 'use_attention_pooling', True),
-        vn_learn_temperature=getattr(args, 'vn_learn_temperature', False),
-        vn_gate_broadcast=getattr(args, 'vn_gate_broadcast', False),
-        vn_mode=getattr(args, 'vn_mode', 'default'),
-        vn_num_heads=getattr(args, 'vn_num_heads', 4),
-        vn_head_dim=getattr(args, 'vn_head_dim', 32),
-        vn_apply_to=getattr(args, 'vn_apply_to', 'backbone'),
-        gradient_checkpointing=getattr(args, 'gradient_checkpointing', False),
         device=device,
         model_type=model_type,
-        derive_currents_from_voltage=getattr(args, 'derive_currents_from_voltage', False),
-        mosfet_current_mlp_config=getattr(args, 'mosfet_current_mlp_config', {}),
-        use_gnn_current_prediction=getattr(args, 'use_gnn_current_prediction', False),
-        current_gnn_config=getattr(args, 'current_gnn_config', {}),
-        use_frozen_device_mlp=getattr(args, 'use_frozen_device_mlp', False),
-        frozen_device_mlp_config=getattr(args, 'frozen_device_mlp_config', {}),
-        use_device_pooling_current=getattr(args, 'use_device_pooling_current', False),
-        device_aggregation_config=getattr(args, 'device_aggregation_config', {}),
-        intermediate_voltage_config=getattr(args, 'intermediate_voltage_config', {}),
-        use_edge_features=getattr(args, 'use_edge_features', False),
-        edge_feature_dim=getattr(args, 'edge_feature_dim', 6),
-        edge_feature_indices=getattr(args, 'edge_feature_indices', None),
-        input_dropout=getattr(args, 'input_dropout', 0.0),
-        use_refinement_pass=getattr(args, 'use_refinement_pass', False),
-        refinement_config=getattr(args, 'refinement_config', {}),
-        ac_head_config=getattr(args, 'ac_head_config', {}),
-        ss_head_config=getattr(args, 'ss_head_config', {}),
-        region_head_config=getattr(args, 'region_head_config', {}),
-        kcl_zspace_projection=getattr(args, 'kcl_zspace_projection', False),
-        kcl_blend_alpha=getattr(args, 'kcl_blend_alpha', 0.0),
-        backbone_layers=getattr(args, 'backbone_layers', 6),
-        state_tower_layers=getattr(args, 'state_tower_layers', 2),
-        sensitivity_tower_layers=getattr(args, 'sensitivity_tower_layers', 2),
-        backbone_jk_config=getattr(args, 'backbone_jk_config', {}),
-        state_tower_jk_config=getattr(args, 'state_tower_jk_config', {}),
-        sensitivity_tower_jk_config=getattr(args, 'sensitivity_tower_jk_config', {}),
-        vov_head_config=getattr(args, 'vov_head_config', {}),
-        vth_head_config=getattr(args, 'vth_head_config', {}),
-        loop_attention_config=getattr(args, 'loop_attention_config', {}),
-        dc_gain_config=getattr(args, 'dc_gain_config', {}),
-        gm_id_head_config=getattr(args, 'gm_id_head_config', {}),
-        subcircuit_dag_config=getattr(args, 'subcircuit_dag_config', {}),
-        vgsvds_config=getattr(args, 'vgsvds_config', {}),
-        iv_embedder_config=getattr(args, 'iv_embedder_config', {}),
-        lut_current_config=getattr(args, 'lut_current_config', {}),
-        lut_op_features_config=getattr(args, 'lut_op_features_config', {}),
-        stack_features_config=getattr(args, 'stack_features_config', {}),
-        lut_residual_config=getattr(args, 'lut_residual_config', {}),
-        mosfet_descriptor_config=getattr(args, 'mosfet_descriptor_config', {}),
-        mosfet_role_config=getattr(args, 'mosfet_role_config', {}),
-        net_role_config=getattr(args, 'net_role_config', {}),
+        **kwargs,
     )
+
+
+def _infer_input_dim(config, state_dict):
+    """Infer input feature dim from state_dict, falling back to the config."""
+    if 'input_proj.weight' in state_dict:
+        return state_dict['input_proj.weight'].shape[1]
+    elif 'input_linear.weight' in state_dict:
+        return state_dict['input_linear.weight'].shape[1]
+    return config.get('input_dim', 20)
+
+
+def resolve_model_kwargs(config, state_dict):
+    """
+    Resolve every create_model kwarg for a saved checkpoint from its flat
+    config dict plus state-dict-key auto-detection, exactly as load_checkpoint
+    has always done. Entries that were never persisted (ckpt=None in
+    MODEL_KWARGS) resolve to the table default - the historical lossiness of
+    the saved config, preserved as-is.
+
+    Args:
+        config: Flat config dict stored in the checkpoint
+        state_dict: Model state dict (used for substring auto-detection)
+
+    Returns:
+        Dict mapping every MODEL_KWARGS name to its resolved value
+    """
+    kwargs = {}
+    for spec in MODEL_KWARGS:
+        if spec['ckpt'] is None:
+            kwargs[spec['name']] = spec['default']
+        else:
+            kwargs[spec['name']] = spec['ckpt'](config, state_dict)
+    return kwargs
 
 
 def save_checkpoint(
@@ -348,8 +487,19 @@ def save_checkpoint(
         config: Dict with all model and training config
         stats: Dict with normalization stats {'vdc': {...}, 'curr': {...}}
         save_yaml: Also save config.yaml alongside checkpoint
+
+    The checkpoint additionally stores the resolved create_model kwargs under
+    the top-level key 'model_kwargs' (resolved from config + state_dict with
+    the same rules load_checkpoint applies). Purely additive: loading does not
+    require it and old checkpoints keep loading through the existing path.
     """
     save_path = Path(save_path)
+
+    resolved_model_kwargs = {
+        'model_type': config.get('model_type', 'deepgen'),
+        'node_feature_dim': _infer_input_dim(config, model_state_dict),
+    }
+    resolved_model_kwargs.update(resolve_model_kwargs(config, model_state_dict))
 
     torch.save({
         'model_state_dict': model_state_dict,
@@ -357,6 +507,7 @@ def save_checkpoint(
         'val_loss': val_loss,
         'config': config,
         'stats': stats,
+        'model_kwargs': resolved_model_kwargs,
     }, save_path)
 
     if save_yaml:
@@ -439,79 +590,19 @@ def load_checkpoint(checkpoint_path, device='cuda'):
     # Get model_type from config (default: 'deepgen')
     model_type = config.get('model_type', 'deepgen')
 
-    # Detect virtual node from state_dict keys (for backward compatibility)
-    # This handles old checkpoints that used separate deepgen_vn model
-    has_vn_keys = any('vn_' in k or 'virtual_node' in k for k in state_dict.keys())
-
-    # Get use_virtual_node from config, or infer from state_dict
-    use_virtual_node = config.get('virtual_node', config.get('use_virtual_node', has_vn_keys))
-
     # Infer input dim from state_dict
-    if 'input_proj.weight' in state_dict:
-        input_dim = state_dict['input_proj.weight'].shape[1]
-    elif 'input_linear.weight' in state_dict:
-        input_dim = state_dict['input_linear.weight'].shape[1]
-    else:
-        input_dim = config.get('input_dim', 20)
+    input_dim = _infer_input_dim(config, state_dict)
+
+    # Resolve every model kwarg from the saved flat config, with the
+    # state-dict-substring auto-detection fallbacks encoded in MODEL_KWARGS
+    model_kwargs = resolve_model_kwargs(config, state_dict)
 
     # Create model - VN is now a config option on 'deepgen'
     model, model_class = create_model(
         node_feature_dim=input_dim,
-        hidden_dim=config.get('hidden', config.get('hidden_dim', 128)),
-        num_layers=config.get('layers', config.get('num_layers', 15)),
-        dropout=config.get('dropout', 0.0),
-        genconv_num_layers=config.get('genconv_num_layers', 2),
-        num_mlp_layers=config.get('num_mlp_layers', 3),
-        jk_mode=config.get('jk_mode', 'cat'),
-        jk_attention=config.get('jk_attention', False),
-        jk_learn_temperature=config.get('jk_learn_temperature', False),
-        norm_type=config.get('norm_type', 'layer'),
-        skip_connection=config.get('skip_connection', True),
-        predict_currents=config.get('predict_currents', False),
-        voltage_head_config=config.get('voltage_head_config', config.get('voltage_head', {})),
-        current_head_config=config.get('current_head_config', config.get('current_head', {})),
-        use_virtual_node=use_virtual_node,
-        use_attention_pooling=config.get('use_attention_pooling', True),
-        vn_learn_temperature=config.get('vn_learn_temperature', False),
-        gradient_checkpointing=False,  # Not needed for inference
         device='cpu',  # Load to CPU first, then transfer after loading weights
         model_type=model_type,  # Use detected model_type from config
-        derive_currents_from_voltage=config.get('derive_currents_from_voltage', False),
-        mosfet_current_mlp_config=config.get('mosfet_current_mlp_config', {}),
-        use_gnn_current_prediction=config.get('use_gnn_current_prediction', False),
-        current_gnn_config=config.get('current_gnn_config', {}),
-        use_frozen_device_mlp=config.get('use_frozen_device_mlp', False),
-        frozen_device_mlp_config=config.get('frozen_device_mlp_config', {}),
-        use_refinement_pass=config.get('use_refinement_pass', False),
-        refinement_config=config.get('refinement_config', {}),
-        ac_head_config=config.get('ac_head_config', {}),
-        ss_head_config=config.get('ss_head_config', {}),
-        region_head_config=config.get('region_head_config', {}),
-        use_device_pooling_current=config.get('use_device_pooling_current',
-            any('device_current_head.' in k for k in state_dict.keys())),
-        device_aggregation_config=config.get('device_aggregation_config',
-            {'enabled': True} if any('device_agg.' in k for k in state_dict.keys()) else {}),
-        backbone_layers=config.get('backbone_layers', 6),
-        state_tower_layers=config.get('state_tower_layers', 2),
-        sensitivity_tower_layers=config.get('sensitivity_tower_layers', 2),
-        backbone_jk_config=config.get('backbone_jk_config', {}),
-        state_tower_jk_config=config.get('state_tower_jk_config', {}),
-        sensitivity_tower_jk_config=config.get('sensitivity_tower_jk_config', {}),
-        vov_head_config=config.get('vov_head_config', {}),
-        vth_head_config=config.get('vth_head_config', {}),
-        dc_gain_config=config.get('dc_gain_config', {}),
-        act_type=config.get('act_type', 'gelu' if any('gelu' in k.lower() for k in state_dict.keys()) else 'relu'),
-        loop_attention_config=config.get('loop_attention_config',
-            {'enabled': True, 'num_heads': 4, 'head_dim': 32, 'apply_to': 'backbone', 'fusion': 'gate'}
-            if any('loop_attn' in k for k in state_dict.keys()) else {}),
-        gm_id_head_config=config.get('gm_id_head_config',
-            {'enabled': True} if any('gm_id_head.' in k for k in state_dict.keys()) else {}),
-        vn_mode=config.get('vn_config', {}).get('mode',
-            'mha' if any('virtual_node.W_q' in k for k in state_dict.keys()) else 'default'),
-        vn_num_heads=config.get('vn_config', {}).get('num_heads', 4),
-        vn_head_dim=config.get('vn_config', {}).get('head_dim', 32),
-        vn_gate_broadcast=config.get('vn_config', {}).get('gate_broadcast',
-            any('virtual_node.gate_projs' in k for k in state_dict.keys())),
+        **model_kwargs,
     )
 
     # Load weights and move to device
@@ -522,7 +613,7 @@ def load_checkpoint(checkpoint_path, device='cuda'):
     # Add detection info to config for reference
     config['_detected'] = {
         'input_dim': input_dim,
-        'has_virtual_node': use_virtual_node,
+        'has_virtual_node': model_kwargs['use_virtual_node'],
         'model_class': model_class,
         'model_type': model_type,
     }
@@ -566,65 +657,43 @@ def build_full_config(args, total_input_dim, predict_currents, voltage_head_conf
     """
     model_type = getattr(args, 'model_type', 'deepgen')
 
-    return {
-        # Model architecture
-        'model_type': model_type,
-        'hidden': args.hidden,
-        'layers': args.layers,
-        'dropout': args.dropout,
-        'jk_mode': args.jk_mode,
-        'jk_attention': args.jk_attention,
-        'jk_learn_temperature': getattr(args, 'jk_learn_temperature', False),
-        'genconv_num_layers': getattr(args, 'genconv_num_layers', 2),
-        'num_mlp_layers': getattr(args, 'num_mlp_layers', 3),
-        'norm_type': getattr(args, 'norm_type', 'layer'),
-        'skip_connection': getattr(args, 'skip_connection', True),
-        # Virtual node config (option on model, not separate model type)
-        'virtual_node': args.virtual_node,
-        'use_attention_pooling': getattr(args, 'use_attention_pooling', True),
-        'vn_learn_temperature': getattr(args, 'vn_learn_temperature', False),
-        'gradient_checkpointing': getattr(args, 'gradient_checkpointing', False),
-        # Prediction heads
+    # Values arriving as explicit parameters of this function rather than
+    # through args (train_v3.py computes these separately)
+    param_values = {
         'predict_currents': predict_currents,
         'voltage_head_config': voltage_head_config,
         'current_head_config': current_head_config,
-        # Voltage-derived current config
         'derive_currents_from_voltage': derive_currents_from_voltage,
-        'mosfet_current_mlp_config': mosfet_current_mlp_config or {},
-        # GNN-based current prediction config
+        'mosfet_current_mlp_config': mosfet_current_mlp_config,
         'use_gnn_current_prediction': use_gnn_current_prediction,
-        'current_gnn_config': current_gnn_config or {},
-        # Frozen Device MLP config
+        'current_gnn_config': current_gnn_config,
         'use_frozen_device_mlp': use_frozen_device_mlp,
-        'frozen_device_mlp_config': frozen_device_mlp_config or {},
-        # Refinement pass config
+        'frozen_device_mlp_config': frozen_device_mlp_config,
         'use_refinement_pass': use_refinement_pass,
-        'refinement_config': refinement_config or {},
-        # AC readout head config
-        'ac_head_config': getattr(args, 'ac_head_config', {}),
-        # gm/gds prediction head config
-        'ss_head_config': getattr(args, 'ss_head_config', {}),
-        # Region classification head config
-        'region_head_config': getattr(args, 'region_head_config', {}),
-        # Tower architecture config
-        'backbone_layers': getattr(args, 'backbone_layers', 6),
-        'state_tower_layers': getattr(args, 'state_tower_layers', 2),
-        'sensitivity_tower_layers': getattr(args, 'sensitivity_tower_layers', 2),
-        'backbone_jk_config': getattr(args, 'backbone_jk_config', {}),
-        'state_tower_jk_config': getattr(args, 'state_tower_jk_config', {}),
-        'sensitivity_tower_jk_config': getattr(args, 'sensitivity_tower_jk_config', {}),
-        # DC gain prediction head config
-        'dc_gain_config': getattr(args, 'dc_gain_config', {}),
-        # Activation type
-        'act_type': getattr(args, 'act_type', 'relu'),
-        # Loop attention config
-        'loop_attention_config': getattr(args, 'loop_attention_config', {}),
-        # gm/Id auxiliary head config
-        'gm_id_head_config': getattr(args, 'gm_id_head_config', {}),
-        # Virtual node config
+        'refinement_config': refinement_config,
+    }
+
+    config = {
+        # Model architecture
+        'model_type': model_type,
+    }
+    for spec in MODEL_KWARGS:
+        source = spec['save']
+        if source is None:
+            # Never persisted (historical gap in the saved config, kept as-is)
+            continue
+        if source == 'param':
+            value = param_values[spec['name']]
+        elif source == 'param_or_empty':
+            value = param_values[spec['name']] or {}
+        else:  # 'args'
+            value = _args_value(args, spec)
+        config[spec['args_attr']] = value
+
+    config.update({
+        # Virtual node config (args.vn_config is never set by the training
+        # entry points, so this stays {} and vn_* settings are not persisted)
         'vn_config': getattr(args, 'vn_config', {}),
-        # Device pooling current
-        'use_device_pooling_current': getattr(args, 'use_device_pooling_current', False),
         # Training params
         'learning_rate': args.lr,
         'weight_decay': getattr(args, 'weight_decay', 0.0),
@@ -640,4 +709,5 @@ def build_full_config(args, total_input_dim, predict_currents, voltage_head_conf
         # Data info
         'dataset': str(dataset_path),
         'input_dim': total_input_dim,
-    }
+    })
+    return config

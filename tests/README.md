@@ -25,4 +25,4 @@ python tests/golden_forward.py --dataset <dataset dir> --out goldens.pt --compar
 
 Comparison is bitwise, so run both halves on the same hardware and library versions. Floating point reductions differ across CPU architectures and between CPU and GPU, so a mismatch caused by moving machines is not a real regression.
 
-The harness is deliberately strict about two things that silently break saved models: the set of `state_dict` keys, because checkpoints from earlier runs are loaded by name, and the forward output values, because most of the physics losses read specific output entries.
+The harness is deliberately strict about two things that silently break saved models. The first is the set of `state_dict` keys, because checkpoints from earlier runs are loaded by name. The second is the forward output values, because most of the physics losses read specific output entries.

@@ -4,7 +4,7 @@ A graph neural network that predicts the result of a SPICE simulation directly f
 
 Code for the Master's thesis *Physics-Informed GNN for Analog Circuit Simulation*, Chair of Design Automation, TUM. The full thesis is in [docs/Master_Thesis.pdf](docs/Master_Thesis.pdf).
 
-## What it predicts
+## Results
 
 | Quantity | Level | Accuracy on the reference circuit |
 |----------|-------|-----------------------------------|
@@ -14,7 +14,17 @@ Code for the Master's thesis *Physics-Informed GNN for Analog Circuit Simulation
 | Output conductance gds | per transistor | roughly 8% per device |
 | DC gain | per circuit | 4.36 dB |
 
-Measured against NGSPICE with BSIM4 models on a held-out validation split of the three-stage Fan single-Miller-compensated amplifier.
+Measured against NGSPICE with BSIM4 models on a held-out validation split of the three-stage Fan single-Miller-compensated amplifier (`fan_smc`).
+
+![Predicted against simulated values](docs/images/parity.png)
+
+*Predictions against SPICE ground truth on the validation set. Voltages in volts, currents and small-signal parameters in log10, DC gain in decibels. The points follow the diagonal across the full range of every quantity, including circuits that do not amplify at all.*
+
+The error is not spread evenly across the circuit. Bias and early-stage devices, whose operating point barely moves between sizings, are predicted almost exactly. The error concentrates on the output device of each later stage, which is exactly where the simulated values swing over many decades.
+
+![Per-device prediction error](docs/images/per_device_error.png)
+
+*Per-device error on `fan_smc` with transistors colored by amplifier stage: (a) net voltage in mV, (b) current, (c) gm and (d) gds in log10.*
 
 Frequency-domain metrics (unity-gain bandwidth, phase margin, gain margin) are deliberately **not** predicted. They depend on the full pole-zero structure and no simple analytical relation holds for them. Adding a bandwidth head also made every other quantity roughly twice as bad. The exploration is documented in the thesis appendix.
 

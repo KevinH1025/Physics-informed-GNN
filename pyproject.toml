@@ -27,3 +27,6 @@ dev = ["pytest>=7.0"]
 
 [tool.setuptools]
 packages = { find = { include = ["circuitgnn*"] } }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

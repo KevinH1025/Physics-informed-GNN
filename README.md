@@ -60,25 +60,49 @@ The soft KCL loss is the weaker form of the same idea, used where the hard form 
 
 ## How the model works
 
-Circuits become **bipartite graphs**. Every device terminal and every net is a node. Edges connect each terminal to its net, with additional edges tying the terminals of one device together. Topology is given to the network rather than inferred.
+Circuits become **bipartite graphs**. Every device terminal and every net is a node. Edges connect each terminal to its net, with additional edges tying the terminals of one device together, and each edge records which terminal it belongs to. Topology is given to the network rather than inferred.
 
 ```mermaid
-graph LR
-    N[Netlist] --> G[Bipartite graph<br/>terminals + nets]
-    G --> B[8 backbone layers]
-    B --> V[Voltage head]
-    B --> I[Current head<br/>device-pooled]
-    B --> S[Small-signal head]
-    S --> D[DC-gain head<br/>analytic + correction]
+flowchart TB
+    subgraph INPUT["Circuit graph"]
+        NF["Node features, 26-dim<br/>device W, L, W/L, M<br/>supply and bias context<br/>node type, net role"]
+        EF["Edge features, 6-dim<br/>gate, drain, source, bulk, p or n"]
+    end
+
+    NF --> PROJ["Linear projection to width 128"]
+
+    subgraph LAYER["One backbone layer, repeated 8 times"]
+        direction TB
+        GA["<b>1. Global self-attention</b><br/>every node attends to every node<br/>4 heads of width 32<br/>added through a learned gate"]
+        MP["<b>2. GINE message passing</b><br/>LayerNorm and GELU<br/>sum of neighbour messages plus edge features<br/>3-layer MLP with a residual connection"]
+        LA["<b>3. Loop attention</b><br/>mean-pool each device's terminals<br/>devices sharing a circuit loop attend to each other<br/>scattered back to terminals through a gate"]
+        GA --> MP --> LA
+    end
+
+    PROJ --> GA
+    EF --> MP
+    LA --> JK["Jumping knowledge<br/>attention-weighted concatenation of all 8 layer outputs<br/>projected back to 128"]
+    JK --> REP["Per-node representation, 149-dim"]
+    NF -. "skip connection: raw device and type features, 21-dim" .-> REP
+
+    REP --> VH["<b>Voltage head</b><br/>linear, 149 to 1"]
+    REP --> IH["<b>Current head</b><br/>one current per device<br/>298 to 128 to 1"]
+    REP --> SH["<b>Small-signal head</b><br/>4 terminals plus operating point<br/>600 to 512 to 256 to 1"]
+    SH -. "gm and gds, gradients detached" .-> DH["<b>DC-gain head</b><br/>analytic gain formula<br/>refined by 35 to 128 to 64 to 1"]
+
+    VH --> OV(["V per net"])
+    IH --> OI(["I per terminal"])
+    SH --> OS(["gm and gds per transistor"])
+    DH --> OD(["DC gain in dB"])
 ```
 
-Each of the eight backbone layers applies three forms of communication in sequence, each as a gated additive update:
+What each part of a backbone layer contributes:
 
-1. **Global self-attention** so every node gets circuit-wide context, which the DC gain needs because it depends on the whole signal path.
-2. **GINE message passing** over the device-net edges for local structure. Edge features record which terminal a connection belongs to, so a gate connection is distinguishable from a drain connection.
-3. **Loop attention** over the circuit's fundamental cycles, letting devices that share a loop attend to one another. Each cycle corresponds to a Kirchhoff voltage law relation. This is the single most important component: removing it more than doubles the voltage error.
+1. **Global self-attention** gives every node circuit-wide context in a single step. The DC gain needs this because it depends on the whole signal path and a device in the first stage shares no local neighbourhood with the output stage. It was preferred over a plain virtual node, which squeezes all global information through one vector.
+2. **GINE message passing** handles local structure over the device-net edges. The edge feature is added to each neighbour's message before the nonlinearity, so the same neighbour contributes differently through a gate connection than through a drain connection. Removing the edge features raises the current error by a third.
+3. **Loop attention** finds the circuit's fundamental cycles, connects every pair of devices within a cycle and lets them attend to each other. Each cycle corresponds to a Kirchhoff voltage law relation that plain message passing, reaching two hops per layer, cannot see directly. It is the single most important component: removing it more than doubles the voltage error.
 
-The outputs of all eight layers are merged by attention-weighted jumping knowledge, concatenated with a skip connection carrying the raw device and type features. Four heads read the result.
+The outputs of all eight layers are merged by attention-weighted jumping knowledge rather than using only the last one and a skip connection carries the raw device and type features to the heads. Eight layers was the best depth: four and six are too shallow while twelve and sixteen start to over-smooth.
 
 Ablations behind these choices (message-passing operator, attention components, depth, head design) are reproducible from the configs under `configs/gnn/tower/`.
 

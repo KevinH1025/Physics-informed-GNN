@@ -594,6 +594,29 @@ def compute_combined_loss(
         vgsvds_gt = torch.stack([vgs_gt, vds_gt], dim=-1)  # [M, 2]
         vgsvds_loss = F.mse_loss(vgsvds_pred, vgsvds_gt)
 
+    # Terms that always use their static weight, in both the uncertainty-weighted
+    # and the plain branch. Both branches sum this one list so they cannot drift
+    # apart as terms are added.
+    statically_weighted = (
+        (kcl_weight, kcl_loss),
+        (constraint_weight, constraint_loss),
+        (gm_physics_loss_weight, gm_physics_loss),
+        (ac_loss_weight, ac_loss),
+        (triode_physics_loss_weight, triode_physics_loss),
+        (cutoff_physics_loss_weight, cutoff_physics_loss),
+        (region_loss_weight, region_loss),
+        (device_consistency_weight, dev_consistency_loss),
+        (kcl_intermediate_weight, kcl_intermediate_loss),
+        (vth_loss_weight, vth_loss),
+        (iv_id_loss_weight, iv_id_loss),
+        (dc_gain_loss_weight, dc_gain_loss),
+        (gm_id_consistency_weight, gm_id_loss),
+        (gm_id_aux_weight, gm_id_aux_loss),
+        (constraint_weight, hardcoded_mirror_loss),
+        (vdiff_loss_weight, vdiff_loss),
+        (vgsvds_loss_weight, vgsvds_loss),
+    )
+
     if uncertainty_weights is not None:
         # Normalized uncertainty weighting (Kendall et al. 2018, weights sum to N_tasks)
         uw = uncertainty_weights.get_weights()
@@ -610,44 +633,14 @@ def compute_combined_loss(
             total_loss = total_loss + uw['vov'] * vov_loss
         # Log_var regularizer (prevents all weights from becoming equal)
         total_loss = total_loss + uncertainty_weights.regularizer()
-        # Regularizers: keep static weights
-        total_loss = total_loss + (kcl_weight * kcl_loss +
-                                   constraint_weight * constraint_loss +
-                                   gm_physics_loss_weight * gm_physics_loss +
-                                   ac_loss_weight * ac_loss +
-                                   triode_physics_loss_weight * triode_physics_loss +
-                                   cutoff_physics_loss_weight * cutoff_physics_loss +
-                                   region_loss_weight * region_loss +
-                                   device_consistency_weight * dev_consistency_loss +
-                                   kcl_intermediate_weight * kcl_intermediate_loss +
-                                   iv_id_loss_weight * iv_id_loss +
-                                   dc_gain_loss_weight * dc_gain_loss +
-                                   gm_id_consistency_weight * gm_id_loss +
-                                   gm_id_aux_weight * gm_id_aux_loss +
-                                   constraint_weight * hardcoded_mirror_loss +
-                                   vdiff_loss_weight * vdiff_loss +
-                                   vgsvds_loss_weight * vgsvds_loss)
     else:
         total_loss = (voltage_weight * voltage_loss +
                       current_weight * current_loss +
-                      kcl_weight * kcl_loss +
-                      constraint_weight * constraint_loss +
-                      gm_physics_loss_weight * gm_physics_loss +
-                      ac_loss_weight * ac_loss +
                       ss_gm_loss_weight * ss_gm_loss +
                       ss_gds_loss_weight * ss_gds_loss +
-                      triode_physics_loss_weight * triode_physics_loss +
-                      cutoff_physics_loss_weight * cutoff_physics_loss +
-                      region_loss_weight * region_loss +
-                      device_consistency_weight * dev_consistency_loss +
-                      kcl_intermediate_weight * kcl_intermediate_loss +
-                      vov_loss_weight * vov_loss +
-                      vth_loss_weight * vth_loss +
-                      iv_id_loss_weight * iv_id_loss +
-                      dc_gain_loss_weight * dc_gain_loss +
-                      gm_id_consistency_weight * gm_id_loss +
-                      gm_id_aux_weight * gm_id_aux_loss +
-                      constraint_weight * hardcoded_mirror_loss +
-                      vdiff_loss_weight * vdiff_loss)
+                      vov_loss_weight * vov_loss)
+
+    for term_weight, term_loss in statically_weighted:
+        total_loss = total_loss + term_weight * term_loss
 
     return total_loss, voltage_loss, current_loss, kcl_loss, diff_pair_loss, mirror_loss, output_stage_loss, lambda_mirror_loss, gm_physics_loss, ac_loss, ss_gm_loss, ss_gds_loss, triode_physics_loss, triode_eq1_loss, triode_eq2_loss, triode_eq3_loss, region_loss, cutoff_physics_loss, kcl_intermediate_loss, vov_loss, vth_loss, iv_id_loss, ac_per_component, dc_gain_loss, gm_id_loss, gm_id_aux_loss, hardcoded_mirror_loss, mirror_pair_losses, vdiff_loss, vgsvds_loss

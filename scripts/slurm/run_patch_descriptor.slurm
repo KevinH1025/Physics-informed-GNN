@@ -12,6 +12,6 @@ cd /dss/dsshome1/03/go49jit2/thesis
 export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
 echo "Start: $(date)"
 
-srun python -u scripts/patch_dataset_mosfet_descriptor.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
+srun python -u scripts/migrations/patch_dataset_mosfet_descriptor.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
 
 echo "End: $(date)"

@@ -10,4 +10,4 @@
 
 cd /dss/dsshome1/03/go49jit2/thesis
 export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
-srun python -u scripts/eval_all_checkpoints.py
+srun python -u scripts/analysis/eval_all_checkpoints.py

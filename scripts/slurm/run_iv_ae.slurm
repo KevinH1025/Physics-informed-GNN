@@ -8,7 +8,7 @@
 #SBATCH -o /dss/dsshome1/03/go49jit2/thesis/slurm_logs/%x_%j.out
 #SBATCH -e /dss/dsshome1/03/go49jit2/thesis/slurm_logs/%x_%j.err
 
-# Usage: sbatch scripts/run_iv_ae.slurm [extra args for train_iv_autoencoder.py]
+# Usage: sbatch scripts/slurm/run_iv_ae.slurm [extra args for train_iv_autoencoder.py]
 # Default: bottleneck 64, batch 1024, all Vbs (32k surfaces).
 
 cd /dss/dsshome1/03/go49jit2/thesis

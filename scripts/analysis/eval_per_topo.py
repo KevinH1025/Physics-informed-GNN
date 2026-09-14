@@ -13,11 +13,11 @@ prints per-topology breakdown of:
   - KCL violation magnitude
 
 Usage:
-    python scripts/eval_per_topo.py <experiment_name_or_path>
+    python scripts/analysis/eval_per_topo.py <experiment_name_or_path>
 
 Example:
-    python scripts/eval_per_topo.py v5_5topo_joint
-    python scripts/eval_per_topo.py datasets/.../experiments/v5_5topo_zeroshot_fansmc
+    python scripts/analysis/eval_per_topo.py v5_5topo_joint
+    python scripts/analysis/eval_per_topo.py datasets/.../experiments/v5_5topo_zeroshot_fansmc
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ import torch
 import torch.nn.functional as F
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args

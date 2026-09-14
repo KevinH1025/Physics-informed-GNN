@@ -6,11 +6,11 @@ import torch
 from pathlib import Path
 from scipy.spatial.distance import cdist
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.checkpoint import load_checkpoint
 from circuitgnn.training.data_loading import load_prebatched_variant, add_ss_node_targets
-from scripts.probe_embeddings import extract_embeddings
+from scripts.analysis.probe_embeddings import extract_embeddings
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

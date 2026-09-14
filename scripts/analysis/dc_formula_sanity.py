@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 PKL = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 OUT = REPO / 'figures/thesis/fig_dc_formula_sanity.png'
 

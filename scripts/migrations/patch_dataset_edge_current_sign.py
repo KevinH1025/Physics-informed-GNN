@@ -20,7 +20,7 @@ patch_dataset_edge_features.py). Final edge_attr shape: [E, 11].
   10:  current_sign  ← NEW
 
 Usage:
-    python scripts/patch_dataset_edge_current_sign.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
+    python scripts/migrations/patch_dataset_edge_current_sign.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
 """
 from __future__ import annotations
 

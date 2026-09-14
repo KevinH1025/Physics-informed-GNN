@@ -18,7 +18,7 @@ echo "Checkpoint: $CHECKPOINT"
 echo "Dataset: $DATASET"
 echo "Start: $(date)"
 
-python3 scripts/probe_embeddings.py \
+python3 scripts/analysis/probe_embeddings.py \
     --checkpoint "$CHECKPOINT" \
     --dataset "$DATASET"
 

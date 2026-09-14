@@ -13,7 +13,7 @@ import pickle
 from pathlib import Path
 import numpy as np
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 
 V_T = 0.02585

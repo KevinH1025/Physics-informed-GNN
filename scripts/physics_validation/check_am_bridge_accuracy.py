@@ -10,7 +10,7 @@ where:
 Uses SPICE ground truth gm/gds values only (no model predictions).
 
 Usage:
-    python scripts/test_am_bridge_accuracy.py --dataset datasets/opamp_5k_ss_v1
+    python scripts/physics_validation/check_am_bridge_accuracy.py --dataset datasets/opamp_5k_ss_v1
 """
 
 import sys
@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.data_loading import load_prebatched_variant
 

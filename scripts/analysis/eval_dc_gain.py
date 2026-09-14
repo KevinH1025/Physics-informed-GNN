@@ -2,7 +2,7 @@
 Loads best model, runs validate(), then runs DC gain eval — same as train_v3.py end section."""
 import sys, os, torch, numpy as np, argparse
 from pathlib import Path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.config import load_config, parse_training_config
 from circuitgnn.training.checkpoint import create_model_from_args

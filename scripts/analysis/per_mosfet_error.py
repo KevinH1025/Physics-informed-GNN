@@ -14,9 +14,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tsne_usingnow_embeddings import load_model_and_run
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.analysis.tsne_usingnow_embeddings import load_model_and_run
 
 # fan_smc has 24 MOSFETs. From the standard fan_smc netlist (verify below).
 ROLE_NAME = {0:'bias_mirror', 1:'diff_pair', 2:'stage1_load', 3:'stage2', 4:'output'}

@@ -1,4 +1,10 @@
 #!/bin/bash
+# Canonical ablation-training launcher. The walltime clones this file used to
+# have (run_abl_{45min,1h,1h15,1h30h,1h45,2h,3h,long}.slurm) are gone: override
+# the defaults below from the sbatch command line instead, e.g.
+#
+#   sbatch --time=1:15:00 --mem=48G scripts/slurm/run_abl.slurm <config> <name>
+#
 #SBATCH --job-name=gnn_abl
 #SBATCH --partition=lrz-hgx-h100-94x4
 #SBATCH --gres=gpu:1
@@ -14,7 +20,7 @@ shift 2
 EXTRA_ARGS="$@"
 
 if [ -z "$CONFIG" ] || [ -z "$NAME" ]; then
-    echo "Usage: sbatch scripts/run_abl.slurm <config> <name> [extra args...]"
+    echo "Usage: sbatch scripts/slurm/run_abl.slurm <config> <name> [extra args...]"
     exit 1
 fi
 

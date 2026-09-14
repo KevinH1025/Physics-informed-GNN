@@ -9,7 +9,7 @@ This script re-normalizes x[:, 0] (W) and x[:, 1] (L) using the param_specs
 from the dataset config (respecting scale: log).
 
 Usage:
-    python scripts/patch_dataset_log_norm.py \
+    python scripts/migrations/patch_dataset_log_norm.py \
         --dataset datasets/opamp_3stage_fan_smc_v6 \
         --config configs/opamp_dataset/opamp_3stage_fan_smc_wide_20k.yaml
 """
@@ -23,7 +23,7 @@ from pathlib import Path
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 def log_normalize(value: float, min_val: float, max_val: float) -> float:

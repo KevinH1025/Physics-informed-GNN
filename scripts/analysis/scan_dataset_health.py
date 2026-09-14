@@ -6,7 +6,7 @@ import pickle, json, gc
 from pathlib import Path
 import numpy as np
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / 'figures/thesis/dataset_health.json'
 VDD = 1.8
 TOL = 0.001

@@ -51,7 +51,8 @@ submit() {
 
   local jobid
   jobid=$(sbatch --parsable --job-name="sv_${alias:0:4}_${method}_n${N}_s${seed}" \
-                 scripts/run_seed_valley.slurm "$config" "$name" "$seed" "$topo" "$N" "$init_from")
+                 --time=2:00:00 --mem=80G \
+                 scripts/slurm/run_seed_valley.slurm "$config" "$name" "$seed" "$topo" "$N" "$init_from")
   echo "$jobid  $name  config=$(basename $(dirname $config))" | tee -a "$submitted_log"
 }
 

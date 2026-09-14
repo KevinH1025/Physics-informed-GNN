@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 OUT_TABLE = REPO / 'figures/thesis/topo_stats.json'
 OUT_AGG = REPO / 'figures/thesis/fig_topo_distributions.png'
 OUT_DEV_VI = REPO / 'figures/thesis/fig_per_device_fansmc_VI.png'

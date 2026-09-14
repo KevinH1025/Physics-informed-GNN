@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / 'datasets/opamp_3stage_fan_smc_openloop_5k/dataset_val.pkl'
 OUT_DIR = REPO / 'figures/thesis'
 OUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[1]
 EXP = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/experiments'
 OUT_DIR = REPO / 'figures/thesis'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,7 +40,7 @@ def run_eval(exp_name: str, json_out: Path) -> dict | None:
         print(f'  [skip] {exp_name} not found')
         return None
     print(f'  running eval on {exp_name}...', flush=True)
-    cmd = [sys.executable, str(REPO / 'scripts/eval_per_topo.py'),
+    cmd = [sys.executable, str(REPO / 'scripts/analysis/eval_per_topo.py'),
            exp_name, '--json-out', str(json_out)]
     res = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True)
     if res.returncode != 0:

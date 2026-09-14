@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-OUT = Path('/dss/dsshome1/03/go49jit2/thesis/figures/thesis/fig_smaxt_curves.png')
+OUT = Path(__file__).resolve().parents[2] / 'figures/thesis/fig_smaxt_curves.png'
 
 V_T = 0.02585     # thermal voltage at 300 K
 n = 1.5            # NMOS slope factor

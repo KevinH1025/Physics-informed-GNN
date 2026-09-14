@@ -12,7 +12,7 @@ physics pretraining. This script:
   3. Saves patched dataset_{train,val}.pkl.
 
 Usage:
-    python scripts/patch_pretrain_combined.py
+    python scripts/migrations/patch_pretrain_combined.py
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 

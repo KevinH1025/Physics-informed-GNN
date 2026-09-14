@@ -10,7 +10,7 @@ import re, statistics as st
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 EXP = REPO / 'datasets/opamp_3stage_fan_smc_openloop_5k/experiments'
 OUT = REPO / 'figures/thesis/fig_data_efficiency_accuracy_v2.png'
 SIZES = [100, 250, 500, 1000, 2500, 4000]

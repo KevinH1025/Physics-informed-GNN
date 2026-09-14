@@ -3,12 +3,12 @@
 Analyze prediction errors by node to identify where the model struggles.
 
 Usage:
-    python scripts/analyze_errors.py --checkpoint datasets/opamp_5k_onehead_constraints_v1/best_model.pt
+    python scripts/analysis/analyze_errors.py --checkpoint datasets/opamp_5k_onehead_constraints_v1/best_model.pt
 """
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 import argparse

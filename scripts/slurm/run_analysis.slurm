@@ -19,7 +19,7 @@ echo "Checkpoint: $CHECKPOINT"
 echo "Dataset: $DATASET"
 echo "Start: $(date)"
 
-srun python scripts/analyze_ss_errors.py \
+srun python scripts/analysis/analyze_ss_errors.py \
     --checkpoint "$CHECKPOINT" \
     --dataset "$DATASET"
 

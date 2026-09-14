@@ -9,4 +9,4 @@
 #SBATCH -e /dss/dsshome1/03/go49jit2/thesis/slurm_logs/%x_%j.err
 cd /dss/dsshome1/03/go49jit2/thesis
 export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
-srun python -u scripts/eval_kcl_residual.py
+srun python -u scripts/analysis/eval_kcl_residual.py

@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 NPZ = REPO / 'figures/thesis/section41_parity_fan_smc.npz'
 OUT = REPO / 'figures/thesis/fig_error_histograms.png'
 

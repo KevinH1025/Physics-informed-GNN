@@ -8,7 +8,7 @@ Creates a 2x2 figure:
   Bottom-right: Histogram of z-scored gds values
 
 Usage:
-    python scripts/plot_gm_gds_distribution.py [--dataset PATH]
+    python scripts/figures/plot_gm_gds_distribution.py [--dataset PATH]
 """
 import sys
 import pickle
@@ -21,7 +21,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 def load_all_variants(split_dir: Path):

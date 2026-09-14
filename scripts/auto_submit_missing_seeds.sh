@@ -29,23 +29,28 @@ submit() {
   fi
   [ -d "${EXP}/${name}" ] && return 2  # already exists, skip
 
-  # Walltime-tiered script choice
-  local script
+  # Walltime/memory tier. One canonical launcher now; the walltime clones are
+  # gone, so --time/--mem go on the sbatch command line and the batch size /
+  # learning rate go through the launcher's optional trailing arguments.
+  local script=scripts/slurm/run_seed_valley.slurm
+  local walltime mem bs lr
+  bs=64; lr=0.003
   if [ "$N" -le 250 ]; then
-    script=scripts/run_seed_valley_1h.slurm        # 1h, bs=64
+    walltime=1:00:00; mem=60G                       # 1h, bs=64
   elif [ "$N" -eq 500 ]; then
-    script=scripts/run_seed_valley.slurm           # 2h, bs=64
+    walltime=2:00:00; mem=80G                       # 2h, bs=64
   elif [ "$N" -eq 1000 ]; then
-    script=scripts/run_seed_valley_3h.slurm        # 3h, bs=64 (bumped from 2h after timeouts)
+    walltime=3:00:00; mem=80G                       # 3h, bs=64 (bumped from 2h after timeouts)
   elif [ "$N" -eq 2500 ]; then
-    script=scripts/run_seed_valley_bs256.slurm     # 2h, bs=256 (verified sufficient)
+    walltime=2:00:00; mem=120G; bs=256; lr=0.006    # 2h, bs=256 (verified sufficient)
   else                                              # N=4000
-    script=scripts/run_seed_valley_bs256_3h.slurm  # 3h, bs=256 (N=4000 needs more)
+    walltime=3:00:00; mem=120G; bs=256; lr=0.006    # 3h, bs=256 (N=4000 needs more)
   fi
 
   local out
   out=$(sbatch --parsable --job-name="all_${alias:0:5}_${method:0:3}_n${N}_s${seed}" \
-    "$script" "$config" "$name" "$seed" "$topo" "$N" "$init_from" 2>&1)
+    --time="$walltime" --mem="$mem" \
+    "$script" "$config" "$name" "$seed" "$topo" "$N" "$init_from" "$bs" "$lr" 2>&1)
   echo "$out" | grep -qE "^[0-9]+$" && return 0 || return 1
 }
 

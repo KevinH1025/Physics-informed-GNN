@@ -19,7 +19,7 @@ import numpy as np
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.data.sampling import generate_lhs_samples, generate_netlist
 from circuitgnn.circuits.simulator import CircuitSimulator

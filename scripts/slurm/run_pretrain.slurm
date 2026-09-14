@@ -14,7 +14,7 @@ shift 2
 EXTRA_ARGS="$@"
 
 if [ -z "$CONFIG" ] || [ -z "$NAME" ]; then
-    echo "Usage: sbatch scripts/run_pretrain.slurm <config> <name> [extra args...]"
+    echo "Usage: sbatch scripts/slurm/run_pretrain.slurm <config> <name> [extra args...]"
     exit 1
 fi
 

@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 
 V_T = 0.02585  # thermal voltage at 27 C

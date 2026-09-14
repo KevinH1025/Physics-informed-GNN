@@ -14,6 +14,6 @@ export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
 echo "Job: $SLURM_JOB_ID | Node: $SLURMD_NODENAME"
 echo "Start: $(date)"
 
-srun /usr/bin/python3 -u scripts/tsne_usingnow_embeddings.py
+srun /usr/bin/python3 -u scripts/analysis/tsne_usingnow_embeddings.py
 
 echo "End: $(date)"

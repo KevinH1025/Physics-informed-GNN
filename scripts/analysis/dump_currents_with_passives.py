@@ -5,13 +5,13 @@ Adds: I_pred_pass_log10, I_tgt_pass_log10 to section41_parity_fan_smc.npz."""
 import sys, pickle, yaml, argparse
 import numpy as np, torch
 from pathlib import Path
-sys.path.insert(0, '.'); sys.path.insert(0, 'scripts')
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args
 from circuitgnn.training.config import parse_training_config
-from eval_all_checkpoints import attach_norm
+from circuitgnn.evaluation import attach_norm
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 EXP = REPO / 'datasets/opamp_3stage_fan_smc_openloop_5k/experiments/ginebn_3layer_bb8_notower_vn_kcl_w10_edge6_netrole_clip03_openloop_5k_usingnow'
 DATA = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 OUT = REPO / 'figures/thesis/section41_parity_fan_smc.npz'

@@ -13,7 +13,7 @@ Also tests the existing saturation equation for comparison:
 Uses SPICE ground truth values only (no model predictions).
 
 Usage:
-    python scripts/test_triode_equations.py --dataset datasets/opamp_5k_ss_v1
+    python scripts/physics_validation/check_triode_equations.py --dataset datasets/opamp_5k_ss_v1
 """
 
 import sys
@@ -24,7 +24,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.data_loading import load_prebatched_variant
 

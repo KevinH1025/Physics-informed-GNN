@@ -18,7 +18,7 @@ cannot drive the LUT. This script patches an existing dataset in place:
      the patched graphs.
 
 Usage:
-    python scripts/patch_dataset_mosfet_wl.py \\
+    python scripts/migrations/patch_dataset_mosfet_wl.py \\
         --dataset-dir datasets/opamp_3stage_fan_smc_v9_5k_nofil \\
         --config configs/opamp_dataset/opamp_3stage_fan_smc_wide_5k_v7_nofil.yaml
 """
@@ -29,7 +29,7 @@ import pickle
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 import yaml

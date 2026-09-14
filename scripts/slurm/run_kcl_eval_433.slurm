@@ -10,4 +10,4 @@
 
 source ~/envs/thesis/bin/activate 2>/dev/null
 cd /dss/dsshome1/03/go49jit2/thesis
-/usr/bin/python3 -u scripts/eval_kcl_residual_section433.py
+/usr/bin/python3 -u scripts/analysis/eval_kcl_residual_section433.py

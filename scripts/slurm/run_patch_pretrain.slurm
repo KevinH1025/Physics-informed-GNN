@@ -12,6 +12,6 @@ cd /dss/dsshome1/03/go49jit2/thesis
 export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
 echo "Start: $(date)"
 
-srun python -u scripts/patch_pretrain_combined.py
+srun python -u scripts/migrations/patch_pretrain_combined.py
 
 echo "End: $(date)"

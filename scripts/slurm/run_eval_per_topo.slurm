@@ -35,5 +35,5 @@ EXPS=(
 for exp in "${EXPS[@]}"; do
   echo ""
   echo "========================================================================"
-  srun python scripts/eval_per_topo.py "$exp"
+  srun python scripts/analysis/eval_per_topo.py "$exp"
 done

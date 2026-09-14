@@ -6,7 +6,7 @@ import json
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 METRIC_JSON = REPO / 'figures/thesis/metric_table_per_n.json'
 # Module-level toggle, set by the runner at the bottom — both modes generated each invocation
 USE_BEST_VS_WORST_SEED = False

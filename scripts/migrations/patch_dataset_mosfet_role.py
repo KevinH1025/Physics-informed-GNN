@@ -14,7 +14,7 @@ Writes `mosfet_role` [M, 7] per graph. Use mosfet_device_names to map device
 indices to roles.
 
 Usage:
-    python scripts/patch_dataset_mosfet_role.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
+    python scripts/migrations/patch_dataset_mosfet_role.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
 """
 from __future__ import annotations
 

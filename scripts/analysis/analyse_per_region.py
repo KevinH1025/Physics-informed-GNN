@@ -8,7 +8,7 @@ Reports voltage, current, gm, and gds errors separately for:
   - Cutoff (region=0)
 
 Usage:
-    python scripts/analyse_per_region.py --checkpoint datasets/opamp_5k_ss_v1/best_model.pt
+    python scripts/analysis/analyse_per_region.py --checkpoint datasets/opamp_5k_ss_v1/best_model.pt
 """
 
 import sys
@@ -19,7 +19,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.checkpoint import load_checkpoint
 from circuitgnn.training.data_loading import (

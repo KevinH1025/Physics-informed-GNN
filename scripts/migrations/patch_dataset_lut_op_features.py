@@ -16,7 +16,7 @@ Stats used for z-scoring are saved alongside the dataset for the pass-2
 training run to reuse at inference.
 
 Usage:
-    python scripts/patch_dataset_lut_op_features.py \\
+    python scripts/migrations/patch_dataset_lut_op_features.py \\
         --dataset-dir datasets/opamp_3stage_fan_smc_v9_5k_nofil \\
         --pass1-ckpt datasets/.../ginbn_3layer_bb8_notower_vn_kcl_w10_v9_5k/best_model.pt \\
         --lut datasets/lut/lut_v2/sky130_mosfet_lut_v2_id_gm_gds.h5
@@ -29,7 +29,7 @@ import pickle
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import torch

@@ -13,7 +13,7 @@ import numpy as np
 from pathlib import Path
 import torch
 
-VAL_PKL = Path('/dss/dsshome1/03/go49jit2/thesis/datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl')
+VAL_PKL = Path(__file__).resolve().parents[2] / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 TOPOS = ['fan_smc', 'sau_cfcc', 'peng_tcfc', 'leung_nmcf', 'leung_nmcnr']
 
 

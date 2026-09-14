@@ -10,11 +10,10 @@ from __future__ import annotations
 import sys, json
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tsne_usingnow_embeddings import load_model_and_run
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.analysis.tsne_usingnow_embeddings import load_model_and_run
 
-OUT_JSON = Path('/dss/dsshome1/03/go49jit2/thesis/figures/thesis/tsne_meaning.json')
+OUT_JSON = Path(__file__).resolve().parents[2] / 'figures/thesis/tsne_meaning.json'
 
 # fan_smc matched pairs — devices that should be electrically/structurally identical
 # (verify against netlist if needed; common 3-stage opamp conventions)

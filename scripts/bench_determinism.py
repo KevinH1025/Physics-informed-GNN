@@ -1,7 +1,8 @@
 """Benchmark scatter determinism approaches for GENConv."""
+from pathlib import Path
 import os, sys, time
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 import torch_scatter

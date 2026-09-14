@@ -10,4 +10,4 @@
 
 source ~/envs/thesis/bin/activate
 cd /dss/dsshome1/03/go49jit2/thesis
-python -u scripts/scan_dataset_health.py
+python -u scripts/analysis/scan_dataset_health.py

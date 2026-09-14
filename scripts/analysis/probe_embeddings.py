@@ -10,8 +10,8 @@ Analyses:
   6. Per-device t-SNE: single device across samples, colored by operating region
 
 Usage:
-    python scripts/probe_embeddings.py --name baseline_sat_only
-    python scripts/probe_embeddings.py --checkpoint datasets/opamp_5k_ss_v1/best_model.pt
+    python scripts/analysis/probe_embeddings.py --name baseline_sat_only
+    python scripts/analysis/probe_embeddings.py --checkpoint datasets/opamp_5k_ss_v1/best_model.pt
 """
 
 import sys
@@ -24,7 +24,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.checkpoint import load_checkpoint
 from circuitgnn.training.data_loading import (

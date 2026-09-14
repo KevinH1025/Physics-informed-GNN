@@ -3,7 +3,7 @@
 Compute relative errors for trained models and append results to training.log.
 
 Usage:
-    python scripts/compute_relative_errors.py --dataset datasets/opamp_2stage_5k_ss_v3 \
+    python scripts/analysis/compute_relative_errors.py --dataset datasets/opamp_2stage_5k_ss_v3 \
         --experiments 2stage_baseline_dc 2stage_soft_2t_w05 2stage_soft_3t_w10 \
                       2stage_soft_all_w05 2stage_kcl_blend03 2stage_ss_gmphy
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.checkpoint import load_checkpoint
 from circuitgnn.training.data_loading import (

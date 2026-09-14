@@ -15,13 +15,13 @@ import numpy as np
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args
 from circuitgnn.training.config import parse_training_config
 from circuitgnn.training.losses import compute_kcl_per_net_debug
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 DATASET = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo'
 EXP = DATASET / 'experiments'
 TOPOS = ['fan_smc', 'sau_cfcc', 'peng_tcfc', 'leung_nmcf', 'leung_nmcnr']

@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 EXP = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/experiments'
 OUT = REPO / 'figures/thesis/fig_physics_ablation.png'
 

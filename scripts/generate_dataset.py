@@ -28,7 +28,7 @@ import numpy as np
 from tqdm import tqdm
 
 # Add project root to path (same as train_v3.py)
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Import from modular data package
 from circuitgnn.data.sampling import generate_lhs_samples, worker_generate_sample

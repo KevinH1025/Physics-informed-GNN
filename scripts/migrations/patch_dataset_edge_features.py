@@ -14,7 +14,7 @@ Run AFTER the dataset is prebatched. Idempotent: only appends if edge_attr
 is exactly 6-dim.
 
 Usage:
-    python scripts/patch_dataset_edge_features.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
+    python scripts/migrations/patch_dataset_edge_features.py --dataset-dir datasets/opamp_3stage_fan_smc_openloop_5k
 """
 from __future__ import annotations
 

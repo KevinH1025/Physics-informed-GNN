@@ -6,7 +6,7 @@ Extracts (Vgs, Vds, W, L, is_nmos, I_ds) for each MOSFET in each circuit sample,
 creating a dataset for training a standalone Device MLP.
 
 Usage:
-    python scripts/extract_device_data.py \
+    python scripts/analysis/extract_device_data.py \
         --dataset datasets/opamp_5k_onehead_constraints_v3 \
         --output datasets/device_mlp/mosfet_samples.pkl
 """

@@ -150,7 +150,7 @@ def main():
 
     # Auto-plot curves
     try:
-        from scripts.plot_pretrain import plot as plot_curves
+        from scripts.figures.plot_pretrain import plot as plot_curves
         plot_curves(log_path, out_dir / 'training_curves.png')
     except Exception as e:
         print(f'[warn] plot failed: {e}')

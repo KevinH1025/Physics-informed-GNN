@@ -10,4 +10,4 @@
 
 cd /dss/dsshome1/03/go49jit2/thesis
 export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
-srun python scripts/build_5topo_corpus.py
+srun python scripts/migrations/build_5topo_corpus.py

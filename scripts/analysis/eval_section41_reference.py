@@ -18,15 +18,14 @@ import numpy as np
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args
 from circuitgnn.training.config import parse_training_config
-from eval_all_checkpoints import _drain_idx_batched, attach_norm
+from circuitgnn.evaluation import _drain_idx_batched, attach_norm
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 OUT_METRICS = REPO / 'figures/thesis/section41_metrics.json'
 OUT_PARITY = REPO / 'figures/thesis/section41_parity_fan_smc.npz'
 

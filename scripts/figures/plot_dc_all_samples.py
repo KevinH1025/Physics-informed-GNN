@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 PKL = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'
 NPZ = REPO / 'figures/thesis/section41_dc_proper.npz'   # has DC_pred_dB_all, ac_valid_all
 OUT = REPO / 'figures/thesis/fig_dc_all_samples.png'

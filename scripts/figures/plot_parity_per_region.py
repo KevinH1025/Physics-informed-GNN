@@ -11,13 +11,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-sys.path.insert(0, '.'); sys.path.insert(0, 'scripts')
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from circuitgnn.data.pretrain_loader import PretrainCombinedLoader
 from circuitgnn.training.checkpoint import create_model_from_args
 from circuitgnn.training.config import parse_training_config
-from eval_all_checkpoints import attach_norm
+from circuitgnn.evaluation import attach_norm
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 EXP = REPO / 'datasets/opamp_3stage_fan_smc_openloop_5k/experiments'
 CKPT = EXP / 'ginebn_3layer_bb8_notower_vn_kcl_w10_edge6_netrole_clip03_openloop_5k_usingnow' / 'best_model.pt'
 DATA = REPO / 'datasets/opamp_3stage_pretrain_combined_5topo/dataset_val.pkl'

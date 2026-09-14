@@ -10,4 +10,4 @@
 
 source ~/envs/thesis/bin/activate
 cd /dss/dsshome1/03/go49jit2/thesis
-python -u scripts/topo_stats_and_dists.py
+python -u scripts/analysis/topo_stats_and_dists.py

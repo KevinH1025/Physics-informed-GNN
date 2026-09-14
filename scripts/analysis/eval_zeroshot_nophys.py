@@ -11,13 +11,12 @@ Compare against the phys-pretrain numbers we already have.
 from __future__ import annotations
 import sys, json
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from eval_zeroshot_held_out import evaluate, EXP
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.analysis.eval_zeroshot_held_out import evaluate, EXP
 
 import torch
 
-OUT = Path('/dss/dsshome1/03/go49jit2/thesis/figures/thesis/section442_zeroshot_kcl_ablation.json')
+OUT = Path(__file__).resolve().parents[2] / 'figures/thesis/section442_zeroshot_kcl_ablation.json'
 
 # Baselines (same-topo scratch) for ratio computation
 BASELINE = {
@@ -71,7 +70,7 @@ def main():
     print(f'{"label":<28}{"topo":<14}{"V":>7}{"I":>7}{"gm":>7}{"gds":>7}')
     print('-' * 100)
     # Show the canonical (already-evaluated) phys runs from earlier JSON for direct comparison
-    phys_path = Path('/dss/dsshome1/03/go49jit2/thesis/figures/thesis/section442_zeroshot_per_topo.json')
+    phys_path = Path(__file__).resolve().parents[2] / 'figures/thesis/section442_zeroshot_per_topo.json'
     if phys_path.exists():
         phys = json.load(open(phys_path))
         for topo in ('fan_smc','sau_cfcc','peng_tcfc','leung_nmcf','leung_nmcnr'):

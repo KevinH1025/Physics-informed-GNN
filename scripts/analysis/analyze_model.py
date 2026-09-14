@@ -2,7 +2,7 @@
 """Analyze tower model: embedding quality, prediction consistency, per-device errors."""
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import torch

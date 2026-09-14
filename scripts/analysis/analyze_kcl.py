@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Analyze per-net KCL violations: GT filter drop counts and per-net breakdown."""
 
+from pathlib import Path
 import sys
 import os
 import pickle
@@ -10,7 +11,7 @@ from collections import defaultdict
 import torch
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.config import load_config, parse_training_config
 from circuitgnn.training.data_loading import load_prebatched_variant

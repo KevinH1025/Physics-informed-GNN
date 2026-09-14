@@ -15,7 +15,7 @@ Per graph:
 Each patched graph gets `graph.node_stack_features` (shape [N, 4], float32).
 
 Usage:
-    python scripts/patch_dataset_stack_features.py \\
+    python scripts/migrations/patch_dataset_stack_features.py \\
         --dataset-dir datasets/opamp_3stage_fan_smc_v9_5k_nofil \\
         --pass1-ckpt .../best_model.pt \\
         --pass1-config .../original_config.yaml
@@ -27,7 +27,7 @@ import pickle
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 from argparse import Namespace

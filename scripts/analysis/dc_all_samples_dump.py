@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 PROPER_NPZ = REPO / 'figures/thesis/section41_dc_proper.npz'   # has MLP all-samples
 PARITY_NPZ = REPO / 'figures/thesis/section41_parity_fan_smc.npz'  # has DC_physics for valid only
 OUT_NPZ = REPO / 'figures/thesis/section41_dc_all_samples.npz'

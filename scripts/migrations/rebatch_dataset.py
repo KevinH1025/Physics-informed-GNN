@@ -6,12 +6,12 @@ This avoids re-running SPICE simulations. It loads the raw sample pkl files,
 adds the new attributes to each graph, and re-creates the pre-batched variants.
 
 Usage:
-    python scripts/rebatch_dataset.py --dataset datasets/opamp_5k_onehead_kcl_v1
+    python scripts/migrations/rebatch_dataset.py --dataset datasets/opamp_5k_onehead_kcl_v1
 """
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import argparse
 import pickle

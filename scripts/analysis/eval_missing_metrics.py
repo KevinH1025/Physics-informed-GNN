@@ -4,11 +4,11 @@ Re-evaluate 10k and 30k models to compute missing metrics
 that weren't logged in the older training script.
 
 Usage:
-    python scripts/eval_missing_metrics.py
+    python scripts/analysis/eval_missing_metrics.py
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 import numpy as np

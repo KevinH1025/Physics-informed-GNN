@@ -6,7 +6,7 @@ effective M from the group-level params and hardcoded multipliers in the
 netlist template.
 
 Usage:
-    python scripts/patch_dataset_add_m.py \
+    python scripts/migrations/patch_dataset_add_m.py \
         --input datasets/opamp_3stage_fan_smc_v4/dataset.pkl \
         --output datasets/opamp_3stage_fan_smc_v4_m/dataset.pkl
 

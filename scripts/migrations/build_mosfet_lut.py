@@ -9,8 +9,8 @@ pattern in scripts/generate_dataset.py). At the end, temp pickles are
 combined into one HDF5 file.
 
 Usage:
-    python scripts/build_mosfet_lut.py
-    python scripts/build_mosfet_lut.py --quick
+    python scripts/migrations/build_mosfet_lut.py
+    python scripts/migrations/build_mosfet_lut.py --quick
 """
 
 import argparse
@@ -24,7 +24,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import h5py

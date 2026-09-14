@@ -13,7 +13,7 @@ import statistics as st
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-REPO = Path('/dss/dsshome1/03/go49jit2/thesis')
+REPO = Path(__file__).resolve().parents[2]
 SEED_JSON = REPO / 'figures/thesis/seed_values_all.json'
 METRIC_JSON = REPO / 'figures/thesis/metric_table_per_n.json'
 

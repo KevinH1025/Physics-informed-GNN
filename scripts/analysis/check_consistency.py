@@ -2,7 +2,7 @@
 """Check current consistency: I_drain == I_source for MOSFETs, I_p == I_n for resistors."""
 import sys, torch, numpy as np
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from circuitgnn.training.checkpoint import load_checkpoint
 from circuitgnn.training.data_loading import (

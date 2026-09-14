@@ -4,10 +4,9 @@ on fan_smc and sau_cfcc at N=500. Uses eval_one from eval_all_checkpoints."""
 from __future__ import annotations
 import json, sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import torch
-from eval_all_checkpoints import eval_one, EXP
+from circuitgnn.evaluation import eval_one, EXP
 
 CELLS = {
     'col1_KCLpre+KCLft':  {'fan_smc': 'v5_5topo_ftzeroshot_fansmc_n500_v2',

@@ -14,7 +14,7 @@ export PATH=/dss/dsshome1/03/go49jit2/.local/bin:$PATH
 echo "Job: $SLURM_JOB_ID | Node: $SLURMD_NODENAME | GPU: $CUDA_VISIBLE_DEVICES"
 echo "Start: $(date)"
 
-srun python scripts/patch_dataset_lut_op_features.py \
+srun python scripts/migrations/patch_dataset_lut_op_features.py \
     --dataset-dir datasets/opamp_3stage_fan_smc_v9_5k_nofil \
     --pass1-ckpt datasets/opamp_3stage_fan_smc_v9_5k_nofil/experiments/ginbn_3layer_bb8_notower_vn_kcl_w10_v9_5k/best_model.pt \
     --pass1-config datasets/opamp_3stage_fan_smc_v9_5k_nofil/experiments/ginbn_3layer_bb8_notower_vn_kcl_w10_v9_5k/original_config.yaml \
